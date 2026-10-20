@@ -2,7 +2,10 @@ import { useState } from 'react'
 import { SLASH_COMMANDS } from '../slashCommands'
 import Icon from './Icon'
 
-/** Text input plus the voice controls (mic, language, male/female voice, reading speed, mute), docked at the bottom. */
+/**
+ * Text input plus the voice controls (mic, language, male/female voice, reading speed, mute), docked at the bottom.
+ * `compact` (mini window) keeps only the mic, mute and Stop.
+ */
 export default function Composer({
   disabled,
   onSubmit,
@@ -22,6 +25,7 @@ export default function Composer({
   speaking,
   onStopSpeaking,
   speechError,
+  compact = false,
 }) {
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState(0)
@@ -102,7 +106,7 @@ export default function Composer({
             }}
             onKeyDown={onKeyDown}
             disabled={disabled}
-            placeholder="Ask Nightmare something, or type / for commands"
+            placeholder={compact ? 'Ask Nightmare…' : 'Ask Nightmare something, or type / for commands'}
             aria-label="Command"
             aria-controls={suggestions.length ? 'slash-list' : undefined}
             aria-expanded={suggestions.length > 0}
@@ -141,7 +145,7 @@ export default function Composer({
           <Icon name="mic" size={14} className={listening ? 'text-ember' : ''} />
           {listening ? 'Release to send' : 'Hold to talk'}
         </button>
-        {micSupported && (
+        {micSupported && !compact && (
           <button
             type="button"
             onClick={onToggleLang}
@@ -162,7 +166,7 @@ export default function Composer({
           <Icon name={muted ? 'mute' : 'voice'} size={14} />
           {muted ? 'Voice off' : 'Voice on'}
         </button>
-        {onToggleVoiceGender && (
+        {onToggleVoiceGender && !compact && (
           <button
             type="button"
             onClick={onToggleVoiceGender}
@@ -172,7 +176,7 @@ export default function Composer({
             {voiceGender}
           </button>
         )}
-        {onCycleRate && (
+        {onCycleRate && !compact && (
           <button
             type="button"
             onClick={onCycleRate}

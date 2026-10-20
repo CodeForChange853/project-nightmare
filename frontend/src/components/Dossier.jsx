@@ -99,7 +99,8 @@ function Stat({ icon, value, label, tone = 'text-bone' }) {
   )
 }
 
-function Selected({ item, readonly, disabled, onRun }) {
+/** One project / reminder / app as a card with its facts and action buttons (also the phone's project page). */
+export function Selected({ item, readonly, disabled, onRun }) {
   const ref = useRef(null)
   useLayoutEffect(() => {
     if (reducedMotion()) return

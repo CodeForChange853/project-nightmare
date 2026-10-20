@@ -87,11 +87,11 @@ def page(browser, server):
     ctx.close()
 
 
-def unlock(page, server, pin=PIN):
-    page.goto(server.url)
+def unlock(page, server, pin=PIN, path="/"):
+    page.goto(server.url + path)
     page.get_by_placeholder("PIN or token").fill(pin)
     page.get_by_role("button", name="Unlock").click()
-    expect(page.get_by_label("Command", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="Hold to talk").first).to_be_visible()
 
 
 def send(page, text):
@@ -155,19 +155,54 @@ def test_phone_pin_is_read_only(page, server):
     assert server.ran == []
 
 
-def test_phone_layout_and_touch_hints(browser, server):
+def test_phone_tabs_project_page_and_back(browser, server):
     ctx = _context(browser, viewport={"width": 412, "height": 880}, is_mobile=True, has_touch=True)
     page = ctx.new_page()
     try:
         unlock(page, server, pin=PHONE_PIN)
+        nav = page.get_by_role("navigation", name="Sections")
+        for tab in ("Talk", "Projects", "Reminders", "Chat"):
+            expect(nav.get_by_role("button", name=tab)).to_be_visible()
         expect(page.get_by_text("Hold the eye to talk")).to_be_visible()
-        page.locator("[data-compact-list]").get_by_role("button", name="bims").tap()
-        # the Details panel sits under the graph on a phone; tapping a project scrolls it into view
-        page.wait_for_function(
-            "() => { const r = document.querySelector('aside').getBoundingClientRect();"
-            " return r.top >= -1 && r.top < innerHeight / 2 }"
-        )
-        expect(page.locator("aside")).to_contain_text("bims")
+        expect(page.get_by_role("button", name="Open the database")).to_have_count(0)  # read-only
+
+        nav.get_by_role("button", name="Projects").tap()
+        page.get_by_role("button", name="bims").tap()
+        expect(page.get_by_role("button", name="Read progress")).to_be_visible()
+        expect(page.get_by_role("button", name="Open folder")).to_have_count(0)
+        page.go_back()  # Android back gesture closes the project page, not Nightmare
+        expect(page.get_by_label("Search projects")).to_be_visible()
+
+        page.get_by_label("Search projects").fill("citi")
+        page.get_by_role("button", name="citizengraph").tap()
+        page.get_by_role("button", name="Read progress").tap()
+        # answered on the Talk tab, right under the eye
+        expect(page.get_by_role("region", name="Latest answer")).to_contain_text("Login page is done")
+
+        nav.get_by_role("button", name="Chat").tap()
+        expect(page.get_by_label("Command", exact=True)).to_be_visible()
+        expect(page.get_by_role("log", name="Conversation")).to_contain_text("progress of citizengraph")
+    finally:
+        ctx.close()
+
+
+def test_mini_window_home_and_back(browser, server):
+    ctx = _context(browser, viewport={"width": 400, "height": 560})
+    page = ctx.new_page()
+    try:
+        unlock(page, server, path="/?mini")
+        expect(page).to_have_title("Nightmare Mini")
+        send(page, "list my projects")
+        expect(page.get_by_role("region", name="Latest answer")).to_contain_text("bims")
+
+        send(page, "home")  # asks the helper to maximize: the title is the signal
+        expect(page).to_have_title("Nightmare")
+        page.set_viewport_size({"width": 1300, "height": 800})
+        expect(page.get_by_label("Nightmare core")).to_be_visible()
+
+        page.set_viewport_size({"width": 400, "height": 560})  # what Ctrl+Alt+N does to a full window
+        expect(page).to_have_title("Nightmare Mini")
+        expect(page.get_by_role("button", name="Full view")).to_be_visible()
     finally:
         ctx.close()
 

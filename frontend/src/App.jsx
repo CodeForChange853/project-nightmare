@@ -9,7 +9,9 @@ import Dossier from './components/Dossier'
 import HelpPanel from './components/HelpPanel'
 import Icon from './components/Icon'
 import LockScreen from './components/LockScreen'
+import MiniView from './components/MiniView'
 import NodeGraph from './components/NodeGraph'
+import PhoneView from './components/PhoneView'
 import SettingsPanel from './components/SettingsPanel'
 import StatusBar from './components/StatusBar'
 import Terminal from './components/Terminal'
@@ -24,6 +26,24 @@ const TOUCH = window.matchMedia('(pointer: coarse)').matches
 const HOLD = TOUCH ? 'Hold the eye' : 'Hold Space'
 // below lg the panel sits under the graph, so on a phone it has to be scrolled to
 const stacked = () => window.matchMedia('(max-width: 1023px)').matches
+
+// The Ctrl+Alt+N helper opens /?mini in a small always-on-top window. That window shows the mini view
+// while it is narrow; the page asks the helper for another size through its title, which the helper
+// watches: "Nightmare Mini" = small and on top, "Nightmare" = maximized.
+const MINI_HOST = new URLSearchParams(window.location.search).has('mini')
+const MINI_TITLE = 'Nightmare Mini'
+const FULL_TITLE = 'Nightmare'
+
+function useMedia(query) {
+  const [match, setMatch] = useState(() => window.matchMedia(query).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(query)
+    const on = () => setMatch(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [query])
+  return match
+}
 
 const VOICE_CMD_RE =
   /^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:switch\s+to|use|change\s+to|set)?\s*(?<gender>male|female)\s+voice\s*[.?!]*$/i
@@ -52,6 +72,10 @@ const WAKE_RE =
 const SLEEP_RE =
   /^\s*(?:(?:hey|ok)\s+)?(?:nightmare[, ]+)?(?:go\s+to\s+sleep|sleep(?:\s+now)?|take\s+a\s+nap|good\s*night)(?:[, ]+nightmare)?\s*[.?!]*$/i
 const GREETING = 'Hello, Nightmare is awake. What are we going to do today?'
+const HOME_RE =
+  /^\s*(?:(?:hey|ok)\s+)?(?:nightmare[, ]+)?(?:(?:go\s+)?home|(?:go\s+)?full\s*screen|full\s+view|show\s+(?:me\s+)?everything|open\s+(?:the\s+)?full\s+(?:view|nightmare|screen))(?:[, ]+nightmare)?\s*[.?!]*$/i
+const MINI_RE =
+  /^\s*(?:(?:hey|ok)\s+)?(?:nightmare[, ]+)?(?:(?:go\s+)?mini|(?:go\s+)?small|small\s+window|mini\s+(?:mode|window|view)|minimi[sz]e(?:\s+nightmare)?)(?:[, ]+nightmare)?\s*[.?!]*$/i
 
 /**
  * Open a website the backend chose (fixed https templates only) as a tab in this browser.
@@ -232,6 +256,15 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false)
   const closeHelp = useCallback(() => setHelpOpen(false), [])
   const [asleep, setAsleep] = useState(false)
+  // layouts: the helper's mini window, the phone (tab bar) and the desktop graph
+  const narrowWindow = useMedia('(max-width: 599px)')
+  const phoneWidth = useMedia('(max-width: 767px)')
+  const [wantFull, setWantFull] = useState(false) // mini window asked to be maximized ("home")
+  const mini = MINI_HOST && narrowWindow
+  const phone = !mini && phoneWidth
+  const [phoneTab, setPhoneTab] = useState('talk')
+  const layoutRef = useRef({})
+  layoutRef.current = { mini, phone, phoneTab }
   const asleepRef = useRef(false)
   asleepRef.current = asleep
   const lastActive = useRef(Date.now())
@@ -301,6 +334,15 @@ export default function App() {
   }, [offline, refreshStatus])
 
   const finishBoot = useCallback(() => setBootDone(true), [])
+
+  useEffect(() => {
+    document.title = MINI_HOST && !wantFull ? MINI_TITLE : FULL_TITLE
+  }, [wantFull])
+  const wasNarrow = useRef(narrowWindow)
+  useEffect(() => {
+    if (MINI_HOST && narrowWindow && !wasNarrow.current) setWantFull(false) // the shortcut shrank it
+    wasNarrow.current = narrowWindow
+  }, [narrowWindow])
 
   const handleLogin = useCallback(
     async (e) => {
@@ -387,6 +429,26 @@ export default function App() {
       cancel()
       switchTab('log')
       add('you', clean)
+      // on the phone, an action from a project page is answered on the Talk tab
+      if (layoutRef.current.phone && layoutRef.current.phoneTab === 'projects') setPhoneTab('talk')
+
+      // "home" / "mini": switch between the small window and the full view, no model call
+      if (HOME_RE.test(clean) || MINI_RE.test(clean)) {
+        const home = HOME_RE.test(clean)
+        let msg
+        if (home) {
+          msg = layoutRef.current.mini ? 'Opening the full view.' : 'You’re already on the full view.'
+          if (layoutRef.current.mini) setWantFull(true)
+        } else if (MINI_HOST) {
+          msg = layoutRef.current.mini ? 'This is the small window.' : 'Back to the small window.'
+          setWantFull(false)
+        } else {
+          msg = 'Press Ctrl+Alt+N on the laptop to open the small window.'
+        }
+        add('nightmare', msg, { ok: true, understood: home ? 'view → full' : 'view → mini' })
+        say(msg)
+        return
+      }
 
       // sleep and wake are handled right here: instant, and they cost no model calls
       if (WAKE_RE.test(clean)) {
@@ -612,21 +674,86 @@ export default function App() {
   }[mode]
 
   const lastAsked = useMemo(() => entries.findLast((e) => e.role === 'you')?.text, [entries])
+  const lastAnswer = useMemo(() => entries.findLast((e) => e.role !== 'you'), [entries])
+
+  const composerProps = {
+    disabled: disabled || offline,
+    onSubmit: submit,
+    listening,
+    micSupported: supported,
+    canTalk,
+    onPressStart: press,
+    onPressEnd: release,
+    lang,
+    onToggleLang: toggleLang,
+    muted,
+    onToggleMute: toggleMute,
+    voiceGender,
+    onToggleVoiceGender: toggleVoiceGender,
+    rate,
+    onCycleRate: cycleRate,
+    speaking,
+    onStopSpeaking: cancel,
+    speechError,
+  }
+  const talkProps = {
+    mode,
+    title,
+    caption,
+    canTalk,
+    onPressStart: press,
+    onPressEnd: release,
+    answer: lastAnswer,
+    asked: lastAsked,
+    busy,
+    elapsed,
+    speaking,
+    onSpeak: say,
+    onStop: cancel,
+  }
 
   return (
-    <div className="relative flex h-dvh flex-col overflow-y-auto lg:overflow-hidden">
+    <div
+      className={`relative flex h-dvh flex-col ${mini || phone ? 'overflow-hidden' : 'overflow-y-auto lg:overflow-hidden'}`}
+    >
       <Background />
-      <StatusBar
-        status={status}
-        locked={locked}
-        lastAsked={lastAsked}
-        onLogout={handleLogout}
-        onRetry={refreshStatus}
-        onSettings={() => setSettingsOpen(true)}
-      />
+      {!mini && (
+        <StatusBar
+          status={status}
+          locked={locked}
+          lastAsked={lastAsked}
+          onLogout={handleLogout}
+          onRetry={refreshStatus}
+          onSettings={() => setSettingsOpen(true)}
+        />
+      )}
 
       {locked ? (
         <LockScreen pin={pinInput} setPin={setPinInput} error={pinError} busy={busy} onSubmit={handleLogin} />
+      ) : mini ? (
+        <MiniView
+          {...talkProps}
+          status={status}
+          offline={offline}
+          onHome={() => submit('home')}
+          composer={composerProps}
+        />
+      ) : phone ? (
+        <PhoneView
+          tab={phoneTab}
+          onTab={setPhoneTab}
+          categories={categories}
+          entries={entries}
+          unread={unread}
+          readonly={readonly}
+          disabled={disabled}
+          onRun={submit}
+          talk={talkProps}
+          composer={composerProps}
+          busy={busy}
+          elapsed={elapsed}
+          onSpeak={say}
+        />
       ) : (
         <main className="grid flex-1 grid-cols-[minmax(0,1fr)] gap-4 px-4 pb-4 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_minmax(380px,420px)] lg:px-6 lg:pb-6">
           <section className="min-h-0 md:h-[600px] lg:h-auto lg:overflow-y-auto" aria-label="Nightmare core">
@@ -702,26 +829,7 @@ export default function App() {
               <Terminal entries={entries} busy={busy} elapsed={elapsed} onSpeak={say} />
             )}
 
-            <Composer
-              disabled={disabled || offline}
-              onSubmit={submit}
-              listening={listening}
-              micSupported={supported}
-              canTalk={canTalk}
-              onPressStart={press}
-              onPressEnd={release}
-              lang={lang}
-              onToggleLang={toggleLang}
-              muted={muted}
-              onToggleMute={toggleMute}
-              voiceGender={voiceGender}
-              onToggleVoiceGender={toggleVoiceGender}
-              rate={rate}
-              onCycleRate={cycleRate}
-              speaking={speaking}
-              onStopSpeaking={cancel}
-              speechError={speechError}
-            />
+            <Composer {...composerProps} />
           </aside>
         </main>
       )}
