@@ -194,6 +194,38 @@ _model_ms: ContextVar[int] = ContextVar("model_ms", default=0)
 ASK_ITEMS = {"weather": "what is the weather", "usage": "how many calls today"}
 
 
+class _SummaryCache(dict):
+    """Summary cache keyed by (file, mtime_ns), backed by SQLite so it survives restarts."""
+
+    def __init__(self, audit: Audit):
+        super().__init__()
+        self._audit = audit
+
+    def __missing__(self, key):
+        text = self._audit.get_summary(*key)
+        if text is None:
+            raise KeyError(key)
+        dict.__setitem__(self, key, text)
+        return text
+
+    def __contains__(self, key):
+        if dict.__contains__(self, key):
+            return True
+        try:
+            self[key]
+        except KeyError:
+            return False
+        return True
+
+    def __setitem__(self, key, text):
+        dict.__setitem__(self, key, text)
+        self._audit.put_summary(key[0], key[1], text)
+
+
+# a file must have been left alone this long before it is summarized in the background
+SETTLE_SEC = 60
+
+
 class Orchestrator:
     def __init__(self, settings: Settings, provider: LLMProvider, registry: Registry,
                  audit: Audit, pending: PendingStore | None = None):
@@ -203,11 +235,76 @@ class Orchestrator:
         self.audit = audit
         self.pending = pending or PendingStore(settings.confirm_ttl)
         self._lock: asyncio.Lock | None = None
-        self._summary_cache: dict[tuple[str, int], str] = {}
+        self._summary_cache: dict[tuple[str, int], str] = _SummaryCache(audit)
         self._last_project: Path | None = None
         # per login session: recent (user, reply) turns and when they last talked
         self._history: dict[str, deque] = {}
         self._history_seen: dict[str, float] = {}
+
+    # ---- background summaries ---------------------------------------------
+
+    def _summary_jobs(self, project: Path):
+        """(cache key, prompt) for this project's progress and about summaries, when the file is readable."""
+        s = self.settings
+        handoff = find_handoff(project, s.handoff_filename)
+        readme = find_readme(project)
+        if handoff is not None:
+            content, _ = read_handoff(handoff, s.desktop_root, s.handoff_filename, s.handoff_max_chars)
+            yield handoff, (str(handoff)), SUMMARY_PROMPT.format(
+                project=project.name, question="What is the latest progress and what is next?",
+                content=content.replace("</handoff", "<\\/handoff"))
+        src, source = (readme, "README") if readme is not None else (handoff, "handoff file")
+        if src is not None:
+            if source == "README":
+                content, _ = read_document(src, s.desktop_root, s.handoff_max_chars)
+            else:
+                content, _ = read_handoff(src, s.desktop_root, s.handoff_filename, s.handoff_max_chars)
+            yield src, f"about:{src}", ABOUT_PROMPT.format(
+                source=source, project=project.name, question="What is this project about?",
+                content=content.replace("</document", "<\\/document"))
+
+    async def refresh_summaries_once(self) -> bool:
+        """Summarize at most one stale handoff/README so later answers are instant.
+
+        Skips while the model is busy with a user request, and files edited in the last
+        SETTLE_SEC seconds. Returns True when a model call was made."""
+        if self._lock is not None and self._lock.locked():
+            return False
+        try:
+            projects = list_projects(self.settings.desktop_root)
+        except PathError:
+            return False
+        for project in projects:
+            try:
+                jobs = list(self._summary_jobs(project))
+            except (PathError, OSError):
+                continue
+            for path, key, prompt in jobs:
+                try:
+                    mtime_ns = path.stat().st_mtime_ns
+                except OSError:
+                    continue
+                if time.time() - mtime_ns / 1e9 < SETTLE_SEC or (key, mtime_ns) in self._summary_cache:
+                    continue
+                try:
+                    summary = await self._ask(prompt)
+                except LLMError:
+                    return False  # model unavailable: try again next round
+                self._summary_cache[(key, mtime_ns)] = summary
+                self.audit.log_action("summary_prewarm", f"{project.name}/{path.name}", "ok")
+                return True
+        return False
+
+    async def run_summary_refresher(self, interval: int) -> None:
+        await asyncio.sleep(20)  # let startup finish first
+        while True:
+            try:
+                worked = await self.refresh_summaries_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # never let the background loop die
+                worked = False
+            await asyncio.sleep(5 if worked else interval)
 
     # ---- conversation memory --------------------------------------------
 

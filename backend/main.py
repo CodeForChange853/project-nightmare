@@ -3,6 +3,8 @@
 allowed Origin. Requests arriving through `tailscale serve` (the phone) are always read-only."""
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 import hashlib
 import hmac
 import secrets
@@ -228,7 +230,18 @@ def create_app(
     settings_access = PinAccess()
     guard = make_guard(settings, sessions)
 
-    app = FastAPI(title="Project Nightmare")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        task = None
+        if settings.summary_refresh_sec > 0:  # keeps handoff/README summaries fresh in the background
+            task = asyncio.create_task(orchestrator.run_summary_refresher(settings.summary_refresh_sec))
+        try:
+            yield
+        finally:
+            if task is not None:
+                task.cancel()
+
+    app = FastAPI(title="Project Nightmare", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.allowed_origins),

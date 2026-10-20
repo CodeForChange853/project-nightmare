@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     provider TEXT NOT NULL, ok INTEGER NOT NULL,
     duration_ms INTEGER NOT NULL, chars_in INTEGER NOT NULL, chars_out INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS summaries (
+    key TEXT PRIMARY KEY, mtime_ns INTEGER NOT NULL,
+    text TEXT NOT NULL, ts TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT NOT NULL,
@@ -88,6 +92,21 @@ class Audit:
                 "total": count("1 = 1"),
                 "avg_ms": avg_ms,
             }
+
+    # ---- cached summaries (survive restarts; valid only for the file's mtime) ----
+
+    def get_summary(self, key: str, mtime_ns: int) -> str | None:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute("SELECT text FROM summaries WHERE key = ? AND mtime_ns = ?",
+                               (key, mtime_ns)).fetchone()
+        return row[0] if row else None
+
+    def put_summary(self, key: str, mtime_ns: int, text: str) -> None:
+        ts, _ = _now()
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute("INSERT OR REPLACE INTO summaries (key, mtime_ns, text, ts) VALUES (?,?,?,?)",
+                         (key, mtime_ns, text, ts))
+            conn.commit()
 
     def prune_actions(self, older_than_days: int) -> int:
         """Drop old activity-log rows. Reminders and model-call counts are kept.

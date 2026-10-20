@@ -63,6 +63,7 @@ class Settings:
     llm_enabled: bool = True
     weather_city: str = "Calbayog"
     weather_api_key: str = ""
+    summary_refresh_sec: int = 0  # background summary refresh interval; 0 = off (env default 180)
     log_retention_days: int = 90  # activity-log rows older than this are pruned at startup; 0 keeps all
     remote_hosts: tuple = ()  # tailscale serve names; requests under them are remote and read-only
 
@@ -112,6 +113,7 @@ class Settings:
             llm_enabled=_flag(env.get("LLM_ENABLED"), True),
             weather_city=env.get("WEATHER_CITY", "Calbayog").strip() or "Calbayog",
             weather_api_key=env.get("OPENWEATHER_API_KEY", "").strip(),
+            summary_refresh_sec=int(env.get("SUMMARY_REFRESH_SEC", "180")),
             log_retention_days=int(env.get("LOG_RETENTION_DAYS", "90")),
             remote_hosts=_hostnames(env.get("NIGHTMARE_ALLOWED_HOSTS")),
         )
