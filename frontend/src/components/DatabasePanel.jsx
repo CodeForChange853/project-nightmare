@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import gsap from 'gsap'
-import { closeDb, deleteDbNote, getDbRecords, openDb } from '../api'
+import { closeDb, deleteDbNote, getDbActions, getDbRecords, openDb } from '../api'
 import Icon from './Icon'
 
 const TABS = [
@@ -8,6 +8,15 @@ const TABS = [
   { key: 'actions', label: 'Activity log' },
   { key: 'llm_calls', label: 'Model calls' },
 ]
+
+const GROUPS = [
+  { key: '', label: 'All' },
+  { key: 'access', label: 'Logins & access' },
+  { key: 'actions', label: 'Actions' },
+  { key: 'reminders', label: 'Reminders' },
+  { key: 'questions', label: 'Questions' },
+]
+const PROBLEM_RE = /fail|error|block|limit|cancel/
 
 const stamp = (ts) => {
   const d = new Date(ts)
@@ -37,6 +46,9 @@ export default function DatabasePanel({ onClose }) {
   const [records, setRecords] = useState(null)
   const [tab, setTab] = useState('notes')
   const [armed, setArmed] = useState(null) // note id waiting for a second click to delete
+  const [filters, setFilters] = useState({ group: '', outcome: '', q: '' })
+  const [activity, setActivity] = useState(null) // {items, more} for the Activity log tab
+  const [loadingMore, setLoadingMore] = useState(false)
 
   const close = useCallback(() => {
     const t = tokenRef.current
@@ -113,6 +125,38 @@ export default function DatabasePanel({ onClose }) {
     }
   }
 
+  // Activity log: filtered on the server, refetched when a filter changes (search waits for a pause)
+  useEffect(() => {
+    if (!token || tab !== 'actions') return
+    let live = true
+    const id = setTimeout(
+      () => {
+        getDbActions(token, filters)
+          .then((res) => live && setActivity(res))
+          .catch((err) => live && setError(err.message))
+      },
+      filters.q ? 250 : 0,
+    )
+    return () => {
+      live = false
+      clearTimeout(id)
+    }
+  }, [token, tab, filters])
+
+  const loadOlder = async () => {
+    const last = activity?.items.at(-1)
+    if (!last) return
+    setLoadingMore(true)
+    try {
+      const res = await getDbActions(token, { ...filters, before: last.id })
+      setActivity((a) => ({ items: [...a.items, ...res.items], more: res.more }))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
   const remove = async (id) => {
     if (armed !== id) {
       setArmed(id)
@@ -128,7 +172,8 @@ export default function DatabasePanel({ onClose }) {
   }
 
   const counts = records?.counts
-  const rows = records?.[tab] ?? []
+  const rows = (tab === 'actions' ? activity?.items : records?.[tab]) ?? []
+  const filtered = Boolean(filters.group || filters.outcome || filters.q)
 
   return (
     <div ref={root} className="fixed inset-0 z-40 flex items-center justify-center bg-abyss/80 p-4 backdrop-blur-md">
@@ -215,7 +260,10 @@ export default function DatabasePanel({ onClose }) {
               ))}
               <button
                 type="button"
-                onClick={() => load(token)}
+                onClick={() => {
+                  load(token)
+                  if (tab === 'actions') setFilters((f) => ({ ...f })) // refetch the log too
+                }}
                 disabled={busy}
                 className="ml-auto flex items-center gap-1.5 rounded-xl border border-scar/60 px-3 py-1.5 text-[12px] text-ash hover:text-bone disabled:opacity-40"
               >
@@ -223,19 +271,56 @@ export default function DatabasePanel({ onClose }) {
               </button>
             </div>
             {error && <p className="px-5 pt-3 text-[12px] text-ember">{error}</p>}
-            {tab !== 'notes' && (
-              <p className="px-5 pt-3 text-[11px] text-smoke">Showing the latest 200 rows.</p>
+            {tab === 'llm_calls' && <p className="px-5 pt-3 text-[11px] text-smoke">Showing the latest 200 rows.</p>}
+            {tab === 'actions' && (
+              <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
+                <div className="flex flex-wrap gap-1" role="group" aria-label="Show">
+                  {GROUPS.map((g) => (
+                    <button
+                      key={g.key}
+                      type="button"
+                      aria-pressed={filters.group === g.key}
+                      onClick={() => setFilters((f) => ({ ...f, group: g.key }))}
+                      className={`rounded-lg px-2.5 py-1 text-[12px] ${
+                        filters.group === g.key ? 'bg-scar/60 text-bone' : 'text-ash hover:text-bone'
+                      }`}
+                    >
+                      {g.label}
+                    </button>
+                  ))}
+                </div>
+                <select
+                  aria-label="Result"
+                  value={filters.outcome}
+                  onChange={(e) => setFilters((f) => ({ ...f, outcome: e.target.value }))}
+                  className="rounded-lg border border-scar/60 bg-abyss/70 px-2 py-1 text-[12px] text-bone outline-none focus:border-ember"
+                >
+                  <option value="">Any result</option>
+                  <option value="problems">Problems only</option>
+                  <option value="ok">OK only</option>
+                </select>
+                <input
+                  type="search"
+                  value={filters.q}
+                  onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))}
+                  placeholder="Search…"
+                  aria-label="Search the activity log"
+                  className="min-w-0 flex-1 rounded-lg border border-scar/60 bg-abyss/70 px-2.5 py-1 text-[12px] text-bone outline-none placeholder:text-smoke focus:border-ember sm:max-w-[16rem]"
+                />
+              </div>
             )}
 
             <div className="scroll-thin min-h-0 flex-1 overflow-auto px-2 pb-3 pt-1">
-              {!records ? (
+              {!records || (tab === 'actions' && !activity) ? (
                 <div className="space-y-2 p-3">
                   {[0, 1, 2, 3].map((i) => (
                     <div key={i} className="shimmer h-8 rounded-lg" />
                   ))}
                 </div>
               ) : rows.length === 0 ? (
-                <p className="p-6 text-center text-[13px] text-ash">Nothing stored here yet.</p>
+                <p className="p-6 text-center text-[13px] text-ash">
+                  {tab === 'actions' && filtered ? 'Nothing matches these filters.' : 'Nothing stored here yet.'}
+                </p>
               ) : (
                 <table className="w-full border-separate border-spacing-0 text-[12.5px]">
                   {tab === 'notes' && (
@@ -287,14 +372,21 @@ export default function DatabasePanel({ onClose }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {rows.map((a, i) => (
-                          <tr key={i} className="text-bone even:bg-scab/40">
+                        {rows.map((a) => (
+                          <tr key={a.id} className="text-bone even:bg-scab/40">
                             <td className="px-3 py-2 text-ash">{stamp(a.ts)}</td>
-                            <td className="px-3 py-2">{a.kind.replaceAll('_', ' ')}</td>
+                            <td className="px-3 py-2">
+                              {a.kind.replaceAll('_', ' ')}
+                              {a.detail.startsWith('remote:') && (
+                                <span className="ml-1.5 rounded-full border border-bile/40 px-1.5 py-px text-[10px] text-bile">
+                                  Phone
+                                </span>
+                              )}
+                            </td>
                             <td className="max-w-[28rem] truncate px-3 py-2 text-ash" title={a.detail}>
                               {a.detail}
                             </td>
-                            <td className={`px-3 py-2 ${/fail|error|block|limit/.test(a.status) ? 'text-bile' : 'text-ash'}`}>
+                            <td className={`px-3 py-2 ${PROBLEM_RE.test(a.status) ? 'text-bile' : 'text-ash'}`}>
                               {a.status.replaceAll('_', ' ')}
                             </td>
                           </tr>
@@ -329,6 +421,18 @@ export default function DatabasePanel({ onClose }) {
                     </>
                   )}
                 </table>
+              )}
+              {tab === 'actions' && activity?.more && (
+                <div className="flex justify-center p-3">
+                  <button
+                    type="button"
+                    onClick={loadOlder}
+                    disabled={loadingMore}
+                    className="rounded-xl border border-scar/60 px-3 py-1.5 text-[12px] text-ash hover:text-bone disabled:opacity-40"
+                  >
+                    {loadingMore ? 'Loading…' : `Load older (showing ${rows.length})`}
+                  </button>
+                </div>
               )}
             </div>
             <p className="border-t border-scar/40 px-5 py-2.5 text-[11px] text-smoke">

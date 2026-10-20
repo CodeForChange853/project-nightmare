@@ -737,3 +737,41 @@ def test_manifest_and_icon_are_served_but_nothing_else_at_root(settings, llm, tm
     assert c.get("/icon.svg").headers["content-type"].startswith("image/svg+xml")
     assert c.get("/manifest.webmanifest?path=secret.txt").text == '{"name": "Nightmare"}'
     assert c.get("/secret.txt").status_code == 404
+
+
+# ---- Phase 6: activity log viewer ----
+
+def test_activity_log_filters_search_and_pages(settings, llm):
+    from dataclasses import replace
+
+    from backend.tools.audit import Audit
+
+    s = replace(settings, pin="123456", phone_pin="999999")
+    c = TestClient(create_app(s, llm), base_url="http://127.0.0.1:8000")
+    c.post("/api/login", json={"pin": "000000"})  # a failed login
+    c.post("/api/login", json={"pin": "123456"})
+    a = Audit(s.db_path)
+    for _ in range(110):
+        a.log_action("weather", "Calbayog", "ok")
+    a.log_action("unrecognized_chat", "battery at 100% now", "fallback")
+    a.log_action("unrecognized_chat", "battery at 1000 now", "fallback")
+    token = c.post("/api/db/open", json={"pin": "123456"}).json()["token"]
+    hdr = {"X-DB-Token": token}
+    get = lambda **params: c.get("/api/db/actions", headers=hdr, params=params).json()
+
+    assert c.get("/api/db/actions").status_code == 403  # needs the database token
+    first = get()
+    assert len(first["items"]) == 100 and first["more"]
+    rest = get(before=first["items"][-1]["id"])
+    assert not rest["more"] and {r["id"] for r in rest["items"]}.isdisjoint(r["id"] for r in first["items"])
+
+    access = get(group="access")["items"]
+    assert {r["kind"] for r in access} == {"login", "db_open"} and any(r["status"] == "failed" for r in access)
+    problems = get(outcome="problems")["items"]
+    assert [r["status"] for r in problems] == ["failed"]
+    assert {r["kind"] for r in get(group="questions")["items"]} == {"weather", "unrecognized_chat"}
+
+    # % and _ are searched literally, not as wildcards
+    assert [r["detail"] for r in get(q="100%")["items"]] == ["battery at 100% now"]
+    assert get(q="at_1")["items"] == []
+    assert len(get(q="CALBAYOG", group="questions")["items"]) == 100

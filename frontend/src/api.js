@@ -86,6 +86,12 @@ export const closeDb = (token) => call('/db/close', { method: 'POST', headers: d
 
 export const getDbRecords = (token) => call('/db/records', { headers: dbHeaders(token) })
 
+export const getDbActions = (token, { group = '', outcome = '', q = '', before } = {}) => {
+  const params = new URLSearchParams({ group, outcome, q })
+  if (before != null) params.set('before', before)
+  return call(`/db/actions?${params}`, { headers: dbHeaders(token) })
+}
+
 export const deleteDbNote = (token, id) =>
   call(`/db/notes/${encodeURIComponent(id)}/delete`, { method: 'POST', headers: dbHeaders(token) })
 

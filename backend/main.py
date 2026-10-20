@@ -397,6 +397,12 @@ def create_app(
             "llm_calls": audit.recent_llm_calls(limit=200),
         }
 
+    @api_router.get("/db/actions")
+    async def db_actions(request: Request, group: str = "", outcome: str = "", q: str = "",
+                         before: int | None = None):
+        require_db(request)
+        return audit.search_actions(group=group, outcome=outcome, query=q, before=before)
+
     @api_router.post("/db/notes/{note_id}/delete")
     async def db_delete_note(note_id: int, request: Request):
         require_db(request)

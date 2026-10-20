@@ -31,6 +31,15 @@ CREATE TABLE IF NOT EXISTS notes (
 """
 
 
+# activity-log filter groups; anything not listed counts as a question (summaries, weather, chat...)
+ACTION_GROUPS = {
+    "access": ["login", "db_open", "db_close", "settings_open", "settings_save", "confirm"],
+    "actions": ["open_app", "open_folder", "open_project_in", "run_task", "run_command", "open_url"],
+    "reminders": ["add_note", "complete_note", "delete_note"],
+}
+PROBLEM_WORDS = ("fail", "error", "block", "limit", "cancel")
+
+
 def _now():
     now = datetime.now().astimezone()
     return now.isoformat(timespec="seconds"), now.strftime("%Y-%m-%d")
@@ -99,6 +108,41 @@ class Audit:
                 "SELECT ts, kind, detail, status FROM actions ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
         return [dict(ts=r[0], kind=r[1], detail=r[2], status=r[3]) for r in rows]
+
+    def search_actions(self, group: str = "", outcome: str = "", query: str = "",
+                       before: int | None = None, limit: int = 100) -> dict:
+        """Activity log viewer: filter by group and outcome, search the text, page with `before`."""
+        where, args = [], []
+        if group in ACTION_GROUPS:
+            kinds = ACTION_GROUPS[group]
+            where.append(f"kind IN ({','.join('?' * len(kinds))})")
+            args += kinds
+        elif group == "questions":  # everything that is not in another group
+            kinds = [k for ks in ACTION_GROUPS.values() for k in ks]
+            where.append(f"kind NOT IN ({','.join('?' * len(kinds))})")
+            args += kinds
+        if outcome == "problems":
+            where.append("(" + " OR ".join("status LIKE ?" for _ in PROBLEM_WORDS) + ")")
+            args += [f"%{w}%" for w in PROBLEM_WORDS]
+        elif outcome == "ok":
+            where.append("status = 'ok'")
+        if query.strip():
+            # LIKE wildcards in the search text are matched literally
+            text = query.strip()[:100].replace("!", "!!").replace("%", "!%").replace("_", "!_")
+            like = f"%{text}%"
+            where.append("(detail LIKE ? ESCAPE '!' OR kind LIKE ? ESCAPE '!')")
+            args += [like, like]
+        if before is not None:
+            where.append("id < ?")
+            args.append(before)
+        sql = "SELECT id, ts, kind, detail, status FROM actions"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY id DESC LIMIT ?"
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            rows = conn.execute(sql, (*args, limit + 1)).fetchall()
+        items = [dict(id=r[0], ts=r[1], kind=r[2], detail=r[3], status=r[4]) for r in rows[:limit]]
+        return {"items": items, "more": len(rows) > limit}
 
     # ---- notes / reminders --------------------------------------------
 
