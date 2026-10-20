@@ -288,11 +288,38 @@ One-time setup (on the laptop, PowerShell in the project folder):
 
 On the phone:
   - Open that address in Chrome, log in with the phone PIN.
-  - Hold the eye (or the "Hold to talk" button) and speak; release to send.
+  - The tab bar at the bottom: Talk / Projects / Reminders / Chat.
+      Talk       hold the big eye and speak; the answer appears right under it,
+                 with Read aloud / Stop; quick asks are buttons below.
+      Projects   search box + list; tap a project for its page (Read progress,
+                 What it's about, Git status). Android's back gesture closes it.
+      Reminders  your open reminders with a Done button.
+      Chat       the whole conversation and the text box.
   - Chrome menu > "Add to Home screen" gives Nightmare its own icon.
-  - Tapping a project or getting an answer scrolls to the panel below.
 
 Laptop commands:
   - .\scripts\setup_tailscale.ps1 -Status   what is being shared
   - .\scripts\setup_tailscale.ps1 -Off      stop sharing (add -Restart to apply now)
+
+-------------------------------------------------------------------------------
+13. SMALL ALWAYS-ON-TOP WINDOW (CTRL+ALT+N, LAPTOP)
+-------------------------------------------------------------------------------
+Purpose: Summon a small Nightmare window over whatever you're doing, from any
+         app. A little helper (backend\hotkey.py) listens for the shortcut;
+         start_nightmare.ps1 starts it together with the backend.
+         Press once: the window opens bottom-right, on top, focused. Hold Space
+         (or the eye) to talk, or type. Press again while it's in front: it
+         hides. Press again: it comes back where you left it.
+         Change the shortcut with NIGHTMARE_HOTKEY in backend\.env
+         (e.g. ctrl+alt+m, win+shift+f9) or turn it off with "off", then run
+         .\scripts\start_nightmare.ps1 -Background.
+
+Voice / Text Commands (in the small window):
+  - Full view:     "home" / "go home" / "full screen" / "show everything"
+                   (or the expand button). The window maximizes and stops
+                   staying on top.
+  - Small again:   "mini" / "small window" / "minimize", or press the shortcut.
+
+Start at Windows log on (backend + shortcut helper):
+  - .\scripts\install_autostart.ps1        (remove: .\scripts\uninstall_autostart.ps1)
 ===============================================================================

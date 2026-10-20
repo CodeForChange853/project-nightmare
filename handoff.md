@@ -38,7 +38,13 @@ Both `handoff.md` and `newsession.md` are kept in sync so that a new coding sess
     - **Space key:** push-to-talk ignores Space inside any `role="dialog"`, so checkboxes and buttons in panels work with the keyboard.
     - **Tests:** `backend/tests/test_settings.py` (20), `backend/tests/test_browser.py` (7 Playwright tests in the installed Chrome against an in-process server: PIN lock/unlock, command reply, click-to-confirm deny/approve, read-only phone PIN, 412 px touch layout, database activity filters, adding an app in Settings then "open paint"). The 6 agy-wrapper tests now run on Windows with a real `.exe` stand-in built by pip's distlib launcher; the detached-launch test runs on Windows too. `frontend/tests/transcript.test.mjs` via `npm test`.
     - **Verified in Chrome** against throwaway servers using scratch copies of apps.json and the database: Settings add-task -> Check -> Save (file, backup, untouched entries kept, "run bims build" asks first without restart); Activity filters on a copy of the real log.
-  - Test suite: **185 passed, 1 skipped** on Windows (the skip is the symlink test, which needs Developer Mode); `npm test` 5 passed.
+  - Test suite: **201 passed, 1 skipped** on Windows (the skip is the symlink test, which needs Developer Mode; includes 8 browser tests and 15 hotkey tests); `npm test` 5 passed.
+  - **Small window, "home", phone tabs (2026-10-20, after Phase 6):**
+    - `backend/hotkey.py` (`pythonw -m backend.hotkey`): registers `NIGHTMARE_HOTKEY` (default `ctrl+alt+n`; needs Ctrl/Alt/Win; `off` disables) with `RegisterHotKey`, opens Chrome `--app=http://127.0.0.1:<port>/?mini`, keeps it 400x560 bottom-right of the work area and `HWND_TOPMOST`. Press logic (`decide`): no window -> launch; minimized / maximized / behind -> show small + focus; in front -> minimize. Takes over a "Nightmare Mini" window left by an earlier run. Watches the window title every 250 ms: "Nightmare" -> maximize + not topmost, "Nightmare Mini" -> small + topmost. Remembers where the user dragged it. Single instance (mutex `Local\ProjectNightmareHotkey`), log `backend/logs/hotkey.log`, MessageBox if the shortcut is taken or Chrome is missing. Only starts Chrome with the fixed local URL; no port, no input. `start_nightmare.ps1` restarts it (matches by command line); `install_autostart.ps1` registers task `ProjectNightmareHotkey`; uninstall removes both. **Autostart is not registered on this laptop** (neither task exists yet).
+    - Page side (`App.jsx`): `MINI_HOST` (`?mini`) + width < 600 -> `MiniView` (eye, title, `AnswerCard`, compact `Composer`). "home"/"go home"/"full screen"/"show everything" and "mini"/"small window"/"minimize" are handled in the browser (`HOME_RE`, `MINI_RE`, no model call) and set `document.title`; when the window goes from wide to narrow (shortcut) the page returns to "mini". `index.html` sets the mini title before React loads so a reload never asks for a maximize. Outside the helper window, "mini" replies with the shortcut and "home" says it's already full.
+    - Phone (< 768 px, not mini): `PhoneView` with a bottom tab bar Talk / Projects / Reminders / Chat. Talk: big `EyeButton`, `AnswerCard` with Read aloud/Stop and a link to Chat, quick asks as 2-column buttons (read-only hides "Open the database"). Projects: search + list, tap -> page with `Selected` (Dossier card, read-only hides Open buttons) and Back; opening pushes history so Android back closes it; an action from a project page switches to Talk to show the answer. Reminders: list + Done. Chat: `Terminal` + `Composer`. Viewport `viewport-fit=cover, interactive-widget=resizes-content` (keyboard shrinks the page so the chat box stays visible); tab bar pads `safe-area-inset-bottom`. Tablets (768-1023) and desktop keep the graph layout.
+    - Shared components: `EyeButton.jsx` (was `orbButton` inside NodeGraph), `AnswerCard.jsx`; `Composer` gained `compact`.
+    - **Verified:** live on the laptop with synthetic Ctrl+Alt+N presses against the real backend: opens 400x560 on top + focused, hides, shows, title "Nightmare" -> maximized and not on top, shortcut -> small again, restarted helper takes over the old window (1 window). Playwright: phone tabs, project page + back, answer on Talk, Chat box; mini window "list my projects", "home" title switch, wide -> graph, narrow -> mini. **UNVERIFIED:** saying "home" by voice inside the real helper window (page and helper halves were each tested), the phone layout on the real Android phone, the keyboard behaviour with `interactive-widget`.
 - **What is next:** Reload Nightmare on the phone and check that voice no longer repeats words. Change both PINs to 6+ digits (both are short and easy to guess). Then **Phase 5 (Local voice upgrade)**: faster-whisper / Piper / wake word, or server-side speech-to-text if Android Web Speech is still unreliable.
 - **Blockers:** None.
 
@@ -133,7 +139,8 @@ project-nightmare/
     tools/fs_reader.py             # project matching, handoff/doc reader, git_info, project_cards
     tools/weather.py               # async weather fetcher (Open-Meteo + wttr.in + OpenWeather) with 10m cache
     tools/audit.py                 # SQLite audit + LLM call counts/latency + notes/reminders + search_actions
-    tests/                         # 185 passed, 1 skipped on Windows (test_browser.py needs Playwright + Chrome)
+    hotkey.py                      # Ctrl+Alt+N helper (pythonw -m backend.hotkey): small always-on-top window
+    tests/                         # 201 passed, 1 skipped on Windows (test_browser.py needs Playwright + Chrome)
   frontend/
     vite.config.js                 # dev proxy injects X-Nightmare-Token
     public/                        # manifest.webmanifest + icon.svg (copied to dist root, served via ROOT_FILES)
@@ -141,6 +148,7 @@ project-nightmare/
     src/App.jsx  api.js            # builds graph categories from /status, PIN unlock, push-to-talk, confirm flow
     src/components/  Orb NodeGraph Dossier Terminal Composer Boot LockScreen ConfirmDialog StatusBar Background Icon
                      DatabasePanel SettingsPanel HelpPanel CountUp
+                     MiniView (Ctrl+Alt+N window) PhoneView (tab bar) EyeButton AnswerCard
     src/utils/       useSpeech.js (Google Web Speech recognition + TTS)  transcript.js (Android merge)  useMic.js
     tests/           transcript.test.mjs (npm test, node:test)
 ```
@@ -194,7 +202,10 @@ project-nightmare/
 # Fresh setup or repair (safe to re-run):
 .\scripts\install.ps1 -Dev
 
-# Run all tests (expect 185 passed, 1 skipped; includes 7 browser tests in Chrome, ~1 min):
+# Start at log on (backend + Ctrl+Alt+N helper); remove with uninstall_autostart.ps1:
+.\scripts\install_autostart.ps1
+
+# Run all tests (expect 201 passed, 1 skipped; includes 8 browser tests in Chrome, ~1 min):
 .\.venv\Scripts\python.exe -m pytest backend -q
 .\.venv\Scripts\python.exe -m pytest backend -q -m "not browser"   # fast
 cd frontend; npm test

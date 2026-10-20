@@ -29,7 +29,8 @@ Open **http://127.0.0.1:<NIGHTMARE_PORT>** in Chrome and type your laptop PIN.
 - **Type:** the command box; `/` lists slash commands (`/help`, `/clear`, `/reminders`, `/db`, `/settings`, `/sleep`).
 - **Apps and tasks:** "open settings" (or the sliders button) and type your PIN to add, change or remove what Nightmare may open or run. Changes work at once, without a restart.
 - **Database:** "database access open" + PIN shows reminders, the activity log (filter by logins, actions, reminders or questions; problems only; search) and model calls.
-- **Phone:** see "Phone access" below.
+- **Small window:** press **Ctrl+Alt+N** anywhere on the laptop for a small always-on-top Nightmare (hold Space to talk). Say "home" for the full view, "mini" or the shortcut to shrink it again, the shortcut again to hide it. `NIGHTMARE_HOTKEY` in `backend\.env` changes or turns off the shortcut.
+- **Phone:** see "Phone access" below. On the phone Nightmare has a Talk / Projects / Reminders / Chat tab bar.
 
 ## Phone access (Tailscale, read-only)
 
@@ -70,6 +71,7 @@ Browser tests drive the built UI (`npm run build` first) in your installed Chrom
 | `backend/core/actions.py` | allowlist registry, action plans, execution, pending confirmations |
 | `backend/core/apps_config.py` | Settings: validation, change list, atomic save, dry-run check |
 | `backend/core/llm.py` | `agy` wrapper |
+| `backend/hotkey.py` | Ctrl+Alt+N helper: opens, hides and resizes the small window (Windows APIs via ctypes) |
 | `backend/tools/` | file reader, weather, SQLite audit and reminders |
-| `frontend/src/` | React UI (eye and graph, panels, speech) |
+| `frontend/src/` | React UI: desktop graph, `MiniView` (small window), `PhoneView` (tab bar), panels, speech |
 | `scripts/` | install, start, autostart, Tailscale |
