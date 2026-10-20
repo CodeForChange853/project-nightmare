@@ -1,0 +1,298 @@
+===============================================================================
+PROJECT NIGHTMARE — VOICE & TEXT COMMAND HELPER (nightmare_helper.txt)
+===============================================================================
+Last Updated: 2026-10-20
+
+HOW TO SPEAK TO NIGHTMARE & CUSTOMIZE VOICE
+- Open http://127.0.0.1:<NIGHTMARE_PORT> (or :5173 in dev mode) in GOOGLE CHROME.
+- Hold down the [Space] key (or hold the "Hold to Talk" button) while speaking,
+  then release when finished.
+- Toggle Google Web Speech recognition language between `mic: en-PH` (Philippine
+  English) and `mic: en-US` in the top status bar.
+- Toggle AI reading voice between Male and Female (`voice: male` / `voice: female`
+  in the top status bar, or say "switch to female voice" / "switch to male voice").
+- Change AI reading speed (`speed: 0.9x / 1x / 1.15x / 1.3x / 1.5x` in the top
+  status bar, or say "speak faster" / "speak slower" / "normal speed").
+- Nightmare automatically reads its full generated replies aloud sentence-by-sentence
+  (and every reply in the terminal log also has a `read aloud` button + `stop reading`
+  button while speaking).
+
+HOW SPEED & MODEL TIERS WORK
+- Tier 0 (Instant Python — <10ms, 0 model calls, uses no quota):
+  Greetings, time/date, help, listing projects, git branch/status, live weather,
+  adding/listing/completing/deleting reminders, opening apps/folders/websites,
+  the database viewer, reading short (<400 char) .md/.txt files, and cached
+  handoff summaries.
+- Tier 1 (Fast — `gemini-3.8-flash-low`, ~7-8s):
+  Single-project `handoff.md` and README summaries, longer `.md`/`.txt` document summaries,
+  and general questions.
+- Tier 2 (Deep — `gemini-3.8-flash-high`, slower than Tier 1):
+  Cross-project comparisons ("which project needs attention?") or whenever you
+  include "think deeply", "analyze deeply", or "use smart model".
+- Gemini 4 Argon is not used. Change models with AGY_FAST_MODEL / AGY_SMART_MODEL
+  in backend/.env (list the choices with `agy models`) and restart the backend.
+
+CONVERSATION MEMORY & SESSIONS
+- Nightmare remembers your last 6 exchanges in this login, so follow-ups like
+  "and what about the second one?" work in general questions.
+- Memory lives only in the running backend: it is forgotten after 30 minutes of
+  silence, when the backend restarts, or when you start a new session.
+- New session: say "new session" / "clear the conversation" / "start over",
+  or type /clear or /new. This also clears the conversation on screen.
+
+SLEEP & WAKE
+- After 5 minutes with no clicks, keys or replies, Nightmare falls asleep: the
+  graph folds away, the eye closes and the title reads "Sleeping". It never
+  sleeps while it is thinking, speaking, or a dialog is open.
+- Sleep now: say "go to sleep" / "good night", or type /sleep.
+- Wake: hold Space and say "Nightmare, wake up" (also "hey nightmare wake up").
+  It answers "Hello, Nightmare is awake. What are we going to do today?" and the
+  graph opens again. Any other command also wakes it and runs as usual.
+- Sleep and wake are handled in the browser and use no model calls.
+
+GRAPH HIGHLIGHTS
+- When a reply is about a node, the graph switches to it, flashes its count, and
+  sends a spark from the eye along the line to that node. When it is about one
+  item (for example "what is the progress of citizengraph"), the spark continues
+  to that project, the arc scrolls to it, and it is selected in Details.
+- Reminders, Projects, Apps, Tasks and Quick asks (weather, usage) all do this.
+
+TYPED SHORTCUTS (TYPE "/" IN THE COMMAND BOX)
+- /help       show this command list (or say "help" / "what can you do")
+- /clear      clear the conversation and start a new session
+- /new        same as /clear
+- /reminders  read your reminders
+- /db         open the database (asks for your PIN)
+- /sleep      put Nightmare to sleep until you say "Nightmare, wake up"
+
+-------------------------------------------------------------------------------
+1. PROJECT PROGRESS & HANDOFF SUMMARIES
+-------------------------------------------------------------------------------
+Purpose: Finds a project folder on your Desktop, reads its `handoff.md` safely,
+         and summarizes current status, recent work, next steps, and blockers.
+         Repeat checks on an unchanged file return instantly from cache.
+
+Voice / Text Commands:
+  - "progress of bims"
+  - "what is the status of citizen graph"
+  - "progress of project nightmare"
+  - "how is bims going"
+  - "check on bims"
+  - "what's going on with bims"
+  - "what is next for bims" / "what's the next task in citizengraph"
+  - "go to my desktop, find project bims and tell me the progress"
+
+If a project has no handoff.md, Nightmare says so and tells you what git knows
+instead (branch, uncommitted files, last commit).
+
+-------------------------------------------------------------------------------
+1b. WHAT A PROJECT IS ABOUT (README)
+-------------------------------------------------------------------------------
+Purpose: Reads the README.md (or readme.txt) at the top of a project folder and
+         says what the project is, who it is for, and what it is built with.
+         With no README it uses handoff.md instead. Repeat asks are instant
+         until the file changes.
+
+Voice / Text Commands:
+  - "what is citizengraph all about"
+  - "what's bims about"
+  - "tell me about project nightmare"
+  - "what does citizengraph do"
+  - "describe bims"
+
+-------------------------------------------------------------------------------
+2. CROSS-PROJECT OVERVIEW (ALL PROJECTS)
+-------------------------------------------------------------------------------
+Purpose: Reads `handoff.md` across every project on your Desktop and uses the
+         Smart Model (`gemini-4-argon-medium`) to tell you which project needs
+         attention first and how all projects compare.
+
+Voice / Text Commands:
+  - "which project needs attention?"
+  - "progress of all my projects"
+  - "status of all projects"
+  - "overview of my projects"
+  - "catch me up on all my projects"
+  - "compare my projects"
+
+-------------------------------------------------------------------------------
+3. LIST DESKTOP PROJECTS
+-------------------------------------------------------------------------------
+Purpose: Instantly lists all project folders found on your Desktop.
+
+Voice / Text Commands:
+  - "list my projects"
+  - "what projects are on my desktop"
+  - "show my projects"
+  - "projects on my desktop"
+
+-------------------------------------------------------------------------------
+4. SAFE DOCUMENT LOOKUP (.md / .txt FILES)
+-------------------------------------------------------------------------------
+Purpose: Searches up to 3 levels deep inside a Desktop project for a `.md` or `.txt`
+         file. Blocks secrets/keys (`.env`, `*password*`, `*secret*`, `*token*`,
+         `*.pem`, `*.key`, `id_rsa*`). Short files (<=400 chars) are read verbatim
+         instantly; longer files are summarized and cached.
+
+Voice / Text Commands:
+  - "open bims/docs, find file.md and tell me what is written"
+  - "read readme.md in bims"
+  - "find architecture.md in citizen graph"
+  - "what is written in notes.txt in bims"
+  - "read the readme file in project nightmare"
+
+-------------------------------------------------------------------------------
+5. FOLLOW-UP CONTEXT ("IT" / "THAT PROJECT")
+-------------------------------------------------------------------------------
+Purpose: Remembers the last project you asked about so you don't have to repeat
+         the project name in your next sentence.
+
+Voice / Text Commands (after asking about e.g. `bims`):
+  - "open it in vs code"
+  - "open that folder"
+  - "what is its status"
+  - "read readme.md in it"
+  - "what branch is it on"
+
+-------------------------------------------------------------------------------
+6. GIT BRANCH & UNCOMMITTED STATUS
+-------------------------------------------------------------------------------
+Purpose: Instantly checks a project's current Git branch and how many uncommitted
+         or untracked files it has (`git status --porcelain --branch`).
+
+Voice / Text Commands:
+  - "what branch is bims on"
+  - "git status of bims"
+  - "git branch of project nightmare"
+
+-------------------------------------------------------------------------------
+7. LIVE WEATHER (DEFAULT: CALBAYOG, OR ANY CITY)
+-------------------------------------------------------------------------------
+Purpose: Fetches live temperature, feels-like, sky conditions, and humidity via
+         Open-Meteo / wttr.in (no API key required; cached for 10 minutes).
+         Default city is set to `Calbayog` (`WEATHER_CITY` in `backend/.env`).
+
+Voice / Text Commands:
+  - "what is the weather"
+  - "check the weather in Calbayog"
+  - "Calbayog weather"
+  - "what is the weather in Manila"
+  - "how hot is it in Cebu"
+  - "is it going to rain in Calbayog"
+
+-------------------------------------------------------------------------------
+8. REMINDERS & NOTES (STORED IN SQLITE)
+-------------------------------------------------------------------------------
+Purpose: Saves personal reminders/notes to `backend/nightmare.db`, shows them on
+         the Reminders node, reads them aloud with a count, marks them done, or
+         deletes them for good (by number or by what they are about).
+
+Voice / Text Commands:
+  - Add:      "remind me later that I have a class at 4pm"
+  - Add:      "remind me later for meeting with adviser"
+  - Add:      "remind me to submit thesis chapter 3" / "set a reminder to pay tuition"
+  - Add:      "add a note: test the login endpoint" / "note to self call advisor at 4pm"
+  - List:     "do I have any reminder today" / "what are my reminders"
+              "how many reminders do I have" / "show my reminders"
+  - Done:     "complete reminder 1" / "mark the class reminder as done"
+  - Delete:   "delete the class reminder" / "remove the meeting reminder"
+              "delete reminder 3" / "delete reminder number three"
+              (removes the database row; if two reminders match, Nightmare asks
+              which number; "delete all reminders" is refused, one at a time only)
+
+-------------------------------------------------------------------------------
+8b. DATABASE ACCESS (PIN REQUIRED, LAPTOP FULL SESSION ONLY)
+-------------------------------------------------------------------------------
+Purpose: Shows the SQLite records in `backend/nightmare.db`: reminders (with a
+         Delete button), the activity log, and model calls. You TYPE the PIN
+         (NIGHTMARE_PIN); it is never spoken or stored in the conversation.
+         Access closes by itself after 10 minutes.
+
+Voice / Text Commands:
+  - Open:   "database access open" / "open the database"
+  - Close:  "database close" / "close the database"  (or press Esc)
+
+-------------------------------------------------------------------------------
+9. OPEN APPS, FOLDERS, & PROJECTS IN EDITORS (LAPTOP FULL SESSION ONLY)
+-------------------------------------------------------------------------------
+Purpose: Launches allowlisted desktop apps (`backend/apps.json`), opens project
+         folders in Windows Explorer, or opens a project inside VS Code.
+         (Blocked automatically when logged in with the read-only Phone PIN.)
+
+Voice / Text Commands:
+  - Open App:             "open notepad" / "open chrome" / "launch vs code"
+  - Open Project Folder:  "open project bims" / "open the bims folder"
+  - Open Project in App:  "open bims in vs code"
+
+-------------------------------------------------------------------------------
+9b. OPEN WEBSITES & SEARCH IN THIS BROWSER
+-------------------------------------------------------------------------------
+Purpose: Opens a website as a NEW TAB in the browser you are using Nightmare in
+         (not by launching the Chrome program), and can search inside it.
+         Known sites: YouTube, Google, Gmail, Google Maps/Drive/Docs/Classroom/
+         Calendar, Gemini, ChatGPT, GitHub, Stack Overflow, Wikipedia, Facebook,
+         Messenger, Instagram, TikTok, Reddit, LinkedIn, Netflix, Spotify, Canva,
+         Figma, Shopee, Lazada, or any "open example.com".
+         If Chrome blocks the new tab, the reply shows a link to open it.
+
+Voice / Text Commands:
+  - "open youtube in this browser" / "open youtube"
+  - "open youtube and search lofi hip hop" / "search youtube for fastapi tutorial"
+  - "play never gonna give you up on youtube" / "play lofi on spotify"
+  - "google how to center a div" / "search for fastapi cookies"
+  - "open github.com"
+
+-------------------------------------------------------------------------------
+10. RUN PREDEFINED TASKS & COMMANDS (LAPTOP FULL SESSION ONLY)
+-------------------------------------------------------------------------------
+Purpose: Plans allowlisted project tasks from `backend/apps.json` (or raw commands
+         if `ALLOW_RAW_COMMANDS=1`). Tasks that require confirmation pop up a UI
+         dialog that can ONLY be approved by a physical mouse click.
+
+Voice / Text Commands:
+  - "start the bims dev server"
+  - "run bims git status"
+  - "run command <cmd>"  (disabled unless ALLOW_RAW_COMMANDS=1 in backend/.env)
+
+-------------------------------------------------------------------------------
+11. INSTANT UTILITY, USAGE & DEEP CHAT
+-------------------------------------------------------------------------------
+Purpose: Instant answers for time/date/help, model call tracking, or general AI Q&A.
+
+Voice / Text Commands:
+  - Time / Date:   "what time is it" / "what is the date today"
+  - Help:          "help" / "what can you do"
+  - Greeting:      "hello nightmare" / "are you there"
+  - Usage / Quota: "usage" / "how many calls did you make today"
+  - Fast Chat:     Ask any general question (uses `gemini-3.8-flash-low`)
+  - Deep Chat:     Include "think deeply" or "use smart model" in your question
+                   to force the smart model (`gemini-3.8-flash-high`).
+
+-------------------------------------------------------------------------------
+12. USE NIGHTMARE FROM YOUR ANDROID PHONE (READ-ONLY, OVER TAILSCALE)
+-------------------------------------------------------------------------------
+Purpose: Talk to Nightmare from your phone anywhere, through your private
+         Tailscale network (HTTPS, only your own devices; never the public
+         internet). Phone sessions are ALWAYS read-only, even if you type the
+         laptop PIN: progress, about, projects, git status, documents, weather,
+         reminders and chat work; opening apps/folders, running tasks,
+         approving dialogs and the database viewer do not.
+
+One-time setup (on the laptop, PowerShell in the project folder):
+  1. Install Tailscale on the laptop (winget install --id Tailscale.Tailscale)
+     and on the phone (Play Store), signed in with the same account.
+  2. In the Tailscale admin console, DNS page: MagicDNS on, HTTPS Certificates on.
+  3. Set NIGHTMARE_PHONE_PIN in backend/.env (6+ digits).
+  4. .\scripts\setup_tailscale.ps1 -Restart
+     It prints the phone address, e.g. https://laptop.tail1234.ts.net/
+
+On the phone:
+  - Open that address in Chrome, log in with the phone PIN.
+  - Hold the eye (or the "Hold to talk" button) and speak; release to send.
+  - Chrome menu > "Add to Home screen" gives Nightmare its own icon.
+  - Tapping a project or getting an answer scrolls to the panel below.
+
+Laptop commands:
+  - .\scripts\setup_tailscale.ps1 -Status   what is being shared
+  - .\scripts\setup_tailscale.ps1 -Off      stop sharing (add -Restart to apply now)
+===============================================================================

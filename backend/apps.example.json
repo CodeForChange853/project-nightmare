@@ -1,0 +1,46 @@
+{
+  "apps": {
+    "vscode": {
+      "label": "VS Code",
+      "argv": ["code"],
+      "project_arg": true,
+      "aliases": ["vs code", "vscode", "visual studio code"]
+    },
+    "chrome": {
+      "label": "Chrome",
+      "argv": ["chrome.exe"],
+      "aliases": ["chrome", "google chrome"]
+    },
+    "notepad": {
+      "label": "Notepad",
+      "argv": ["notepad.exe"],
+      "aliases": ["notepad"]
+    },
+    "terminal": {
+      "label": "Windows Terminal",
+      "argv": ["wt.exe"],
+      "project_arg": true,
+      "project_flag": "-d",
+      "aliases": ["terminal", "windows terminal"]
+    }
+  },
+  "tasks": {
+    "bims-dev": {
+      "label": "BIMS dev server",
+      "project": "bims",
+      "argv": ["npm", "run", "dev"],
+      "aliases": ["bims dev server", "bims dev"],
+      "wait": false,
+      "confirm": true
+    },
+    "bims-git-status": {
+      "label": "git status in BIMS",
+      "project": "bims",
+      "argv": ["git", "status", "--short"],
+      "aliases": ["bims git status"],
+      "wait": true,
+      "timeout": 20,
+      "confirm": false
+    }
+  }
+}

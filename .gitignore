@@ -1,0 +1,16 @@
+.env
+backend/.env
+backend/apps.json
+*.db
+.venv/
+__pycache__/
+.pytest_cache/
+node_modules/
+agy_smoke_result.txt
+frontend/.env.local
+frontend/dist/
+backend/logs/
+backend/backups/
+*.db-wal
+*.db-shm
+*.db-journal
