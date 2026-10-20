@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { mergeTranscripts } from './transcript'
 
 const Recognition =
   typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null
@@ -91,10 +92,8 @@ export function useRecognizer({ onFinal }) {
 
     rec.onresult = (event) => {
       gotResultRef.current = true
-      const text = Array.from(event.results)
-        .map((r) => r[0].transcript)
-        .join(' ')
-        .trim()
+      // Android repeats the growing phrase in every result; mergeTranscripts keeps one copy
+      const text = mergeTranscripts(Array.from(event.results, (r) => r[0].transcript))
       textRef.current = text
       setInterim(text)
     }
