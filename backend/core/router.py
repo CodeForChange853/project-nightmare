@@ -26,7 +26,7 @@ ADD_NOTE_RE = re.compile(
     + r"(?:remind\s+me(?:\s+(?:later|again|tomorrow|today|tonight|soon))?(?:\s+(?:to|that|about|of|for|on))?"
     r"|(?:add|set|create|make|save)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:reminder|note)(?:\s+(?:to|that|about|for|on))?"
     r"|note\s+(?:to\s+self|that|down)"
-    r"|remember\s+(?:to|that))"
+    r"|remember\s+to)"
     r"[:,\s]+(?P<note>.+?)\s*[.!]*$",
     re.I,
 )
@@ -39,6 +39,20 @@ COMPLETE_NOTE_RE = re.compile(
     + r"(?:i\s*(?:'m|am)\s+)?(?:complete|finish(?:ed)?|check\s+off|tick\s+off|mark|done\s+with)\s+"
     r"(?P<rest>.*?\b(?:reminders?|notes?)\b.*?)\s*[.!?]*$",
     re.I,
+)
+# facts about the user or the world, kept until "forget ..." (reminders use "remind me to ...")
+REMEMBER_RE = re.compile(
+    LEAD + r"(?:remember\s+(?:that|this)|keep\s+in\s+mind(?:\s+that)?)[:,\s]+(?P<fact>.+?)\s*[.!]*$",
+    re.I,
+)
+FORGET_RE = re.compile(
+    LEAD + r"(?:forget|unremember)\s+(?:that\s+|about\s+)?(?P<fact>.+?)\s*[.!?]*$",
+    re.I,
+)
+LIST_FACTS_RE = re.compile(
+    r"\b(?:what\s+do\s+you\s+(?:remember|know)(?:\s+about\s+me)?|what\s+have\s+i\s+told\s+you"
+    r"|(?:list|show|read|check)\s+(?:me\s+)?(?:all\s+)?(?:my\s+|your\s+)?(?:memories|facts)"
+    r"|what\s+(?:are\s+)?(?:my\s+|your\s+)?memories)\b"
 )
 NOTE_ID_RE = re.compile(
     r"#\s*(?P<a>\d{1,6})\b|\b(?:reminders?|notes?)\s+(?:number\s+|no\s+|num\s+)?(?P<b>\d{1,6})\b|^\s*(?P<c>\d{1,6})\s*$",
@@ -230,6 +244,7 @@ GENERIC_SEARCH_RE = re.compile(
 class Intent:
     kind: str  # run_command | run_task | open_folder | open_project_in | open_app |
     # list_projects | cross_project | read_doc | about | progress | git_status |
+    # remember_fact | forget_fact | list_facts |
     # weather | add_note | list_notes | complete_note | usage | chat
     text: str
     app_id: str | None = None
@@ -277,6 +292,8 @@ def describe_intent(intent: Intent) -> str:
         return "add_note"
     if intent.kind == "list_notes":
         return "list_notes"
+    if intent.kind in {"remember_fact", "forget_fact", "list_facts"}:
+        return intent.kind
     if intent.kind in {"complete_note", "delete_note"}:
         target = f"#{intent.note_id}" if intent.note_id is not None else f"“{intent.note_text or '?'}”"
         return f"{intent.kind} → {target}"
@@ -400,6 +417,12 @@ def route(
     if SETTINGS_CLOSE_RE.match(text):
         return Intent("settings_close", text)
 
+    m_fact = REMEMBER_RE.match(text)
+    if m_fact:
+        return Intent("remember_fact", text, note_text=m_fact.group("fact").strip())
+    if LIST_FACTS_RE.search(n) and not ANY_FILENAME_RE.search(text):
+        return Intent("list_facts", text)
+
     m_note = ADD_NOTE_RE.match(text)
     if m_note:
         return Intent("add_note", text, note_text=m_note.group("note").strip())
@@ -410,6 +433,11 @@ def route(
             if m_target:
                 note_id, description = _note_target(m_target.group("rest"))
                 return Intent(kind, text, note_id=note_id, note_text=description)
+
+    if not ANY_FILENAME_RE.search(text):
+        m_forget = FORGET_RE.match(text)
+        if m_forget:
+            return Intent("forget_fact", text, note_text=m_forget.group("fact").strip())
 
     if LIST_NOTES_RE.search(n) and not _is_doc_query(text, n):
         return Intent("list_notes", text)

@@ -40,6 +40,18 @@ CONVERSATION MEMORY & SESSIONS
 - New session: say "new session" / "clear the conversation" / "start over",
   or type /clear or /new. This also clears the conversation on screen.
 
+LONG-TERM MEMORY (laptop and phone can read; only the laptop can change it)
+- Facts: "remember that my defense is in March" / "keep in mind that I like dark mode".
+  Reminders still use "remind me to ..." or "remember to ...".
+- Hear them: "what do you remember" / "what have I told you" / "list my memories".
+- Remove one: "forget that my defense is in March" or "forget memory 3" (one at a time).
+- Facts stay until you forget them. They also show, with a Delete button, in the
+  database panel (tab Memory).
+- Saved conversations: your questions and answers (not PIN, database, settings, shell
+  or reminder commands) are kept in the local database for 90 days. Older days are
+  condensed into a short summary in the background. Only the memories related to your
+  current question go into the model's prompt.
+
 SLEEP & WAKE
 - After 5 minutes with no clicks, keys or replies, Nightmare falls asleep: the
   graph folds away, the eye closes and the title reads "Sleeping". It never

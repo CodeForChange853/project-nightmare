@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import gsap from 'gsap'
-import { closeDb, deleteDbNote, getDbActions, getDbRecords, openDb } from '../api'
+import { closeDb, deleteDbFact, deleteDbNote, getDbActions, getDbRecords, openDb } from '../api'
 import Icon from './Icon'
 
 const TABS = [
   { key: 'notes', label: 'Reminders' },
+  { key: 'facts', label: 'Memory' },
   { key: 'actions', label: 'Activity log' },
   { key: 'llm_calls', label: 'Model calls' },
 ]
@@ -164,7 +165,7 @@ export default function DatabasePanel({ onClose }) {
     }
     setArmed(null)
     try {
-      await deleteDbNote(token, id)
+      await (tab === 'facts' ? deleteDbFact : deleteDbNote)(token, id)
       await load(token)
     } catch (err) {
       setError(err.message)
@@ -341,6 +342,42 @@ export default function DatabasePanel({ onClose }) {
                             <td className="break-words px-3 py-2">{n.text}</td>
                             <td className="px-3 py-2 text-ash">{stamp(n.ts)}</td>
                             <td className={`px-3 py-2 ${n.done ? 'text-smoke' : 'text-ember'}`}>{n.done ? 'Done' : 'Active'}</td>
+                            <td className="px-3 py-2 text-right">
+                              <button
+                                type="button"
+                                onClick={() => remove(n.id)}
+                                onBlur={() => setArmed((a) => (a === n.id ? null : a))}
+                                className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] ${
+                                  armed === n.id
+                                    ? 'border-ember bg-crimson/30 text-white'
+                                    : 'border-scar/60 text-ash hover:border-ember/60 hover:text-bone'
+                                }`}
+                              >
+                                <Icon name="trash" size={12} />
+                                {armed === n.id ? 'Click to confirm' : 'Delete'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </>
+                  )}
+                  {tab === 'facts' && (
+                    <>
+                      <thead>
+                        <tr>
+                          <Th className="w-12">#</Th>
+                          <Th>Remembered (say "forget that ...")</Th>
+                          <Th className="w-36">Added</Th>
+                          <Th className="w-28" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((n) => (
+                          <tr key={n.id} className="text-bone even:bg-scab/40">
+                            <td className="px-3 py-2 text-ember">{n.id}</td>
+                            <td className="break-words px-3 py-2">{n.text}</td>
+                            <td className="px-3 py-2 text-ash">{stamp(n.ts)}</td>
                             <td className="px-3 py-2 text-right">
                               <button
                                 type="button"

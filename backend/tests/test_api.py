@@ -775,3 +775,19 @@ def test_activity_log_filters_search_and_pages(settings, llm):
     assert [r["detail"] for r in get(q="100%")["items"]] == ["battery at 100% now"]
     assert get(q="at_1")["items"] == []
     assert len(get(q="CALBAYOG", group="questions")["items"]) == 100
+
+
+def test_memory_in_database_viewer_and_phone_cannot_change_it(settings, llm):
+    from dataclasses import replace
+
+    s = replace(settings, pin="123456")
+    c = TestClient(create_app(s, llm), base_url="http://127.0.0.1:8000")
+    c.post("/api/login", json={"pin": "123456"})
+    assert "remember that" in c.post("/api/chat", json={"text": "remember that I like tea"}).json()["reply"]
+    token = c.post("/api/db/open", json={"pin": "123456"}).json()["token"]
+    h = {"X-DB-Token": token}
+    rec = c.get("/api/db/records", headers=h).json()
+    assert rec["counts"]["facts"] == 1 and rec["facts"][0]["text"] == "I like tea"
+    assert c.post("/api/db/facts/999/delete", headers=h).status_code == 404
+    assert c.post(f"/api/db/facts/{rec['facts'][0]['id']}/delete", headers=h).json()["ok"]
+    assert c.get("/api/db/records", headers=h).json()["counts"]["facts"] == 0

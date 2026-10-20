@@ -224,6 +224,7 @@ def create_app(
     registry = Registry.load(settings.apps_file)
     audit = Audit(settings.db_path)
     audit.prune_actions(settings.log_retention_days)
+    audit.prune_conversations(settings.log_retention_days)  # raw chats expire; facts and day summaries stay
     orchestrator = Orchestrator(settings, provider, registry, audit)
     sessions = SessionStore(ttl=settings.session_ttl)
     db_access = PinAccess()
@@ -406,6 +407,8 @@ def create_app(
         return {
             "counts": audit.table_counts(),
             "notes": audit.list_notes(include_done=True),
+            "facts": audit.list_facts(),
+            "day_summaries": audit.list_day_summaries(30),
             "actions": audit.recent_actions(limit=200),
             "llm_calls": audit.recent_llm_calls(limit=200),
         }
@@ -423,6 +426,15 @@ def create_app(
         if deleted is None:
             raise HTTPException(404, "That reminder no longer exists.")
         audit.log_action("delete_note", f"#{note_id} (database viewer)", "ok")
+        return {"ok": True, "deleted": deleted}
+
+    @api_router.post("/db/facts/{fact_id}/delete")
+    async def db_delete_fact(fact_id: int, request: Request):
+        require_db(request)
+        deleted = audit.delete_fact(fact_id)
+        if deleted is None:
+            raise HTTPException(404, "That memory no longer exists.")
+        audit.log_action("forget_fact", f"#{fact_id} (database viewer)", "ok")
         return {"ok": True, "deleted": deleted}
 
     # ---- Settings: "open settings" -> PIN -> edit apps.json (laptop only, never by voice) ----

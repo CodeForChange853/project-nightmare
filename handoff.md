@@ -4,14 +4,19 @@ Last updated: 2026-10-20 (Asia/Manila). Keep both files identical after every mi
 
 ## 0. Quick status (read by Nightmare's own `progress` command)
 
-- **Done:** Phases 1, 1.5, 2, 3, 4, 6, plus small window/phone tabs and **Phase 7A (part)**. Phone over Tailscale works live; the Android repeated-words fix is confirmed by the user.
+- **Done:** Phases 1, 1.5, 2, 3, 4, 6, plus small window/phone tabs, **Phase 7A** and **Phase 7C (memory)**. Phone over Tailscale works live; the Android repeated-words fix is confirmed by the user.
 - **In progress: Phase 7** (speed, memory, workspace awareness, offline). Order: **A -> C -> D -> B**.
   - **7A done (2026-10-20, committed, UNVERIFIED live: needs `start_nightmare.ps1 -Rebuild`):**
     - Instant replies (no model): "what's your name (again)", "who are you"; opening a well-known program that is not in apps.json (Word, PowerPoint, Excel, Outlook, Teams, Discord, Zoom, Steam, ...) answers "X isn't in your allowed apps, add it in Settings" instead of a ~12 s model call.
     - Fuzzy browser-side commands (`App.jsx`): "mayor/major/to/go/2 sleep" -> sleep; "oo/ou/u/you/to mini" -> mini.
     - Timing: every answer logs a `timing` row (`intent | router ms | model ms | total ms`, never the user's words); own group `timing` in the activity filters.
     - Summaries persist in SQLite (`summaries` table, valid only for the file's mtime), so restarts no longer cost a model call. A background refresher (`SUMMARY_REFRESH_SEC`, default 180, 0 = off; `Orchestrator.refresh_summaries_once`, started from FastAPI `lifespan`) pre-summarizes one stale handoff/README per round, skips files edited < 60 s ago and rounds where the model is busy, logs `summary_prewarm`.
-  - **7A left:** A3 speak sooner (stream agy output; findings below). Then C, D, B.
+  - **A3 skipped (measured):** agy's stream (`--output-format stream-json`, events `step_update` with `step_type: agent_response` + `text_delta`) delivers a whole 120-word answer within ~1.2 s of the first text (first text at 9.7 s, end 10.9 s), so speaking while streaming saves ~1 s only; the wait is startup + thinking.
+  - **7C Memory done (2026-10-20, 228 tests incl. browser pass, UNVERIFIED live with real agy):**
+    - "remember that X" / "keep in mind that X" saves a **fact** (`facts` table; no model; "remember to X" is still a reminder). "what do you remember" / "what have I told you" lists them; "forget that X" / "forget memory N" removes one at a time (refuses "all", asks if several match). Phone sessions can list but not add/forget (`MEMORY_WRITE_INTENTS`). Max 200 facts. Database panel has a **Memory** tab with Delete (`POST /db/facts/{id}/delete`).
+    - Conversations are saved (`conversations` table; not PIN/db/settings/shell/reminder/fact turns), raw rows pruned after `LOG_RETENTION_DAYS` (90) at startup; facts and `day_summaries` stay. The background refresher condenses one past day per round into a <=60-word summary (`_condense_one_day`, logs `day_condense`).
+    - Recall (`backend/core/memory.py`, plain Python): chat prompts get a `<memory>` data block with only relevant facts (word overlap; recent facts if the question is personal), older turns (>30 min old) and day summaries; `understood` shows "N memories". Closing tag neutralized.
+  - **Next:** D workspace awareness, then B offline.
 - **User decisions for Phase 7:** do the recommended options. Do **not** install Ollama; the user has a fine-tuned **Llama 3 8B Instruct** (from the CitizenGraph project) to consider for offline use in B; propose how to use it before installing anything. Phone may read (not change) saved memory. Keep raw conversations 90 days, remembered facts until "forget". Dev tasks found automatically always need a click.
 - **Still to confirm on the phone:** the new tab layout and that the keyboard keeps the chat box visible. Change both PINs to 6+ digits.
 - **Blockers:** none.
@@ -70,9 +75,9 @@ Tiers: instant Python < 10 ms; fast model ~8-12 s; smart model ~12-15 s. Chat se
 ```
 scripts/  install.ps1 nightmare_env.ps1 start_nightmare.ps1 setup_tailscale.ps1 install_autostart.ps1 uninstall_autostart.ps1 agy_smoke_test.py
 backend/  __main__.py main.py(FastAPI, lifespan starts summary refresher) config.py(.env) hotkey.py
-  core/ router.py(regex intents, QUICK_*, UNLISTED_APP_NAMES) orchestrator.py(handlers, _SummaryCache, refresher, timing)
+  core/ router.py(regex intents, QUICK_*, UNLISTED_APP_NAMES) orchestrator.py(handlers, _SummaryCache, refresher, timing) memory.py(relevance recall)
         actions.py(Registry, plans, execute, PendingStore) apps_config.py llm.py(AgyProvider, NoLLMProvider)
-  tools/ fs_reader.py weather.py audit.py(SQLite: actions, llm_calls, notes, summaries)
+  tools/ fs_reader.py weather.py audit.py(SQLite: actions, llm_calls, notes, summaries, facts, conversations, day_summaries)
   tests/ 200 passed, 1 skipped (non-browser) + 8 browser tests
 frontend/ src/App.jsx api.js components/* utils/(useSpeech.js transcript.js useMic.js) tests/transcript.test.mjs
 ```
@@ -89,7 +94,7 @@ frontend/ src/App.jsx api.js components/* utils/(useSpeech.js transcript.js useM
 - Phases 1, 1.5, 2, 3, 4, 6: **done**. Phase 5 (voice upgrade) is folded into Phase 7B.
 - **Phase 7 plan:**
   - **A Speed:** done: more instant replies/fuzzy matching, persistent + background summaries, timing log. Left: A3 speak the first sentence while agy still streams (check feasibility first).
-  - **C Memory:** conversations stored in SQLite, older turns condensed to a summary; "remember that X"/"forget X" facts, viewable/deletable in the database panel, phone read-only; recall only memories relevant to the question; raw conversations 90 days.
+  - **C Memory (DONE):** conversations stored in SQLite, older turns condensed to a summary; "remember that X"/"forget X" facts, viewable/deletable in the database panel, phone read-only; recall only memories relevant to the question; raw conversations 90 days.
   - **D Workspace awareness:** background scan (no model) of git branch, uncommitted files, ahead/behind, last commit, handoff changes, TODO counts; briefings ("what changed since yesterday", "what should I work on", nudges); dev tasks found from package.json scripts/pytest/git ("run bims tests", "run it again") that always ask for a click; detection is plain code.
   - **B Offline:** measure first, switch only where faster than agy. Candidate local model: the user's fine-tuned Llama 3 8B Instruct (CPU-only is likely slow; propose before installing anything). faster-whisper (~150-500 MB) and Piper (~60 MB) need approval before download. Offline status bar; weather keeps its last reading.
 - **Rules:** update both handoff files after work; keep the LLM out of the action path (new actions via apps.json allowlist or validated read-only tools); backend stays on 127.0.0.1; never claim something works unless run on this machine; label UNVERIFIED.
@@ -101,6 +106,6 @@ frontend/ src/App.jsx api.js components/* utils/(useSpeech.js transcript.js useM
 .\scripts\setup_tailscale.ps1 -Restart      # phone access (-Status, -Off)
 .\scripts\install.ps1 -Dev                  # setup/repair, safe to re-run
 .\scripts\install_autostart.ps1             # start at log on (backend + hotkey helper)
-.\.venv\Scripts\python.exe -m pytest backend -q -m "not browser"   # expect 200 passed, 1 skipped
+.\.venv\Scripts\python.exe -m pytest backend -q -m "not browser"   # expect 228 passed, 1 skipped (with browser tests)
 cd frontend; npm test
 ```

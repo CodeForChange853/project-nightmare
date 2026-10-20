@@ -95,6 +95,9 @@ export const getDbActions = (token, { group = '', outcome = '', q = '', before }
 export const deleteDbNote = (token, id) =>
   call(`/db/notes/${encodeURIComponent(id)}/delete`, { method: 'POST', headers: dbHeaders(token) })
 
+export const deleteDbFact = (token, id) =>
+  call(`/db/facts/${encodeURIComponent(id)}/delete`, { method: 'POST', headers: dbHeaders(token) })
+
 // Settings (apps.json): same idea as the database, its own PIN-bought token
 const settingsHeaders = (token) => ({ 'X-Settings-Token': token })
 

@@ -26,6 +26,19 @@ CREATE TABLE IF NOT EXISTS summaries (
     key TEXT PRIMARY KEY, mtime_ns INTEGER NOT NULL,
     text TEXT NOT NULL, ts TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS facts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    text TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL, day TEXT NOT NULL,
+    user_text TEXT NOT NULL, reply_text TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS day_summaries (
+    day TEXT PRIMARY KEY, text TEXT NOT NULL, ts TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT NOT NULL,
@@ -202,6 +215,88 @@ class Audit:
             conn.commit()
         return {"id": row[0], "ts": row[1], "text": row[2], "done": bool(row[3])}
 
+    # ---- remembered facts ("remember that ...") ---------------------------
+
+    def add_fact(self, text: str) -> dict:
+        ts, _ = _now()
+        clean = " ".join(text.split())[:300]
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute("SELECT id, ts, text FROM facts WHERE lower(text) = lower(?)", (clean,)).fetchone()
+            if row:  # telling it the same thing twice keeps one copy
+                return {"id": row[0], "ts": row[1], "text": row[2], "duplicate": True}
+            cur = conn.execute("INSERT INTO facts (ts, text) VALUES (?, ?)", (ts, clean))
+            conn.commit()
+            return {"id": cur.lastrowid, "ts": ts, "text": clean, "duplicate": False}
+
+    def list_facts(self) -> list[dict]:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            rows = conn.execute("SELECT id, ts, text FROM facts ORDER BY id ASC").fetchall()
+        return [{"id": r[0], "ts": r[1], "text": r[2]} for r in rows]
+
+    def delete_fact(self, fact_id: int) -> dict | None:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            row = conn.execute("SELECT id, ts, text FROM facts WHERE id = ?", (fact_id,)).fetchone()
+            if row is None:
+                return None
+            conn.execute("DELETE FROM facts WHERE id = ?", (fact_id,))
+            conn.commit()
+        return {"id": row[0], "ts": row[1], "text": row[2]}
+
+    # ---- saved conversations and their daily condensed summaries -----------
+
+    def add_turn(self, user_text: str, reply_text: str) -> None:
+        ts, day = _now()
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute(
+                "INSERT INTO conversations (ts, day, user_text, reply_text) VALUES (?,?,?,?)",
+                (ts, day, user_text[:500], reply_text[:800]),
+            )
+            conn.commit()
+
+    def recent_turns(self, limit: int = 400) -> list[dict]:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            rows = conn.execute(
+                "SELECT id, ts, user_text, reply_text FROM conversations ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [{"id": r[0], "ts": r[1], "user": r[2], "reply": r[3]} for r in rows]
+
+    def days_to_condense(self, before_day: str) -> list[str]:
+        """Past days that have saved turns but no summary yet, oldest first."""
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT day FROM conversations WHERE day < ? AND day NOT IN (SELECT day FROM day_summaries)"
+                " ORDER BY day ASC", (before_day,),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def turns_for_day(self, day: str, limit: int = 40) -> list[dict]:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            rows = conn.execute(
+                "SELECT user_text, reply_text FROM conversations WHERE day = ? ORDER BY id ASC LIMIT ?", (day, limit)
+            ).fetchall()
+        return [{"user": r[0], "reply": r[1]} for r in rows]
+
+    def put_day_summary(self, day: str, text: str) -> None:
+        ts, _ = _now()
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute("INSERT OR REPLACE INTO day_summaries (day, text, ts) VALUES (?,?,?)", (day, text[:1200], ts))
+            conn.commit()
+
+    def list_day_summaries(self, limit: int = 60) -> list[dict]:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            rows = conn.execute("SELECT day, text FROM day_summaries ORDER BY day DESC LIMIT ?", (limit,)).fetchall()
+        return [{"day": r[0], "text": r[1]} for r in rows]
+
+    def prune_conversations(self, older_than_days: int) -> int:
+        """Raw saved conversations expire; condensed day summaries and facts stay."""
+        if older_than_days <= 0:
+            return 0
+        cutoff = (datetime.now().astimezone() - timedelta(days=older_than_days)).strftime("%Y-%m-%d")
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            cur = conn.execute("DELETE FROM conversations WHERE day < ?", (cutoff,))
+            conn.commit()
+            return cur.rowcount
+
     # ---- database viewer (PIN-gated in main.py) --------------------------
 
     def recent_llm_calls(self, limit: int = 200) -> list[dict]:
@@ -223,6 +318,9 @@ class Audit:
             return {
                 "notes": count("SELECT COUNT(*) FROM notes"),
                 "notes_active": count("SELECT COUNT(*) FROM notes WHERE done = 0"),
+                "facts": count("SELECT COUNT(*) FROM facts"),
+                "conversations": count("SELECT COUNT(*) FROM conversations"),
+                "day_summaries": count("SELECT COUNT(*) FROM day_summaries"),
                 "actions": count("SELECT COUNT(*) FROM actions"),
                 "llm_calls": count("SELECT COUNT(*) FROM llm_calls"),
             }
