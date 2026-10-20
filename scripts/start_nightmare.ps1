@@ -32,6 +32,15 @@ foreach ($Conn in $StaleConns) {
     }
 }
 
+# Ctrl+Alt+N helper (backend\hotkey.py): restart it too, so it picks up new code and settings.
+# It exits by itself if NIGHTMARE_HOTKEY=off.
+# (match on the command line only: the venv runs it as pythonw.exe -> pythonw3.11.exe)
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like '*-m backend.hotkey*' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Process -FilePath (Join-Path $Root ".venv\Scripts\pythonw.exe") -ArgumentList "-m", "backend.hotkey" -WorkingDirectory $Root
+Write-Host "[nightmare] Shortcut helper started (Ctrl+Alt+N unless NIGHTMARE_HOTKEY says otherwise)." -ForegroundColor Green
+
 if ($Background) {
     $PythonW = Join-Path $Root ".venv\Scripts\pythonw.exe"
     Start-Process -FilePath $PythonW -ArgumentList "-m", "backend" -WorkingDirectory $Root

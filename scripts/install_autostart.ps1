@@ -21,5 +21,11 @@ $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 
 Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Description "Project Nightmare local assistant (single server)" -Force | Out-Null
 Write-Host "[nightmare] Registered Task Scheduler task '$TaskName' (runs At log on via pythonw.exe)." -ForegroundColor Green
+
+# The Ctrl+Alt+N helper is its own task: Task Scheduler waits for one action to end before the next.
+$HotkeyTask = "ProjectNightmareHotkey"
+$HotkeyAction = New-ScheduledTaskAction -Execute $PythonW -Argument "-m backend.hotkey" -WorkingDirectory $Root
+Register-ScheduledTask -TaskName $HotkeyTask -Action $HotkeyAction -Trigger $Trigger -Settings $Settings -Description "Project Nightmare Ctrl+Alt+N window shortcut" -Force | Out-Null
+Write-Host "[nightmare] Registered '$HotkeyTask' (the Ctrl+Alt+N shortcut helper)." -ForegroundColor Green
 Write-Host "[nightmare] Starting task now..." -ForegroundColor Green
 Start-ScheduledTask -TaskName $TaskName
