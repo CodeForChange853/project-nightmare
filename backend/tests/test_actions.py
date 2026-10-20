@@ -76,7 +76,6 @@ def test_execute_missing_program(tmp_path):
     assert not r.ok and "not found" in r.message
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="posix launcher path")
 def test_execute_detached_launch(tmp_path):
     plan = actions.ActionPlan("open_app", "launch", argv=[sys.executable, "-c", "pass"], cwd=tmp_path)
     assert actions.execute(plan).ok

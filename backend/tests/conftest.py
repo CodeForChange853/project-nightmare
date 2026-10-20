@@ -45,3 +45,7 @@ def settings(tmp_path, desktop):
 @pytest.fixture
 def registry():
     return Registry(APPS)
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "browser: drives the built UI in Chrome (needs Playwright)")

@@ -1,3 +1,4 @@
 # Tests: pip install -r backend\requirements-dev.txt
 -r requirements.txt
 pytest==9.1.1
+playwright==1.64.0  # browser tests; uses your installed Chrome, no browser download

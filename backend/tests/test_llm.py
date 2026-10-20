@@ -2,12 +2,11 @@ import asyncio
 import stat
 import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 
 from backend.core.llm import AgyProvider, LLMError, parse_agy_json
-
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="uses a posix shell-script stand-in for agy")
 
 FAKE_AGY = textwrap.dedent(
     """\
@@ -32,6 +31,18 @@ FAKE_AGY = textwrap.dedent(
 
 @pytest.fixture
 def fake_agy(tmp_path):
+    if sys.platform == "win32":
+        # the real agy is a native .exe, so the stand-in is one too (pip's script launcher);
+        # a .cmd wrapper would mangle the newlines and quotes these tests send
+        from pip._vendor.distlib.scripts import ScriptMaker
+
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "agy.py").write_text(FAKE_AGY.format(python="python"))  # "#!python": use maker.executable
+        maker = ScriptMaker(str(src), str(tmp_path), add_launchers=True)
+        maker.executable = sys.executable
+        maker.variants = {""}
+        return Path(maker.make("agy.py")[0])
     path = tmp_path / "agy"
     path.write_text(FAKE_AGY.format(python=sys.executable))
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
