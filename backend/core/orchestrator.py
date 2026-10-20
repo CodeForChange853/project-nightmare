@@ -188,6 +188,8 @@ NODE_FOR_INTENT = {
 PROJECT_ITEM_INTENTS = frozenset({"progress", "about", "read_doc", "git_status", "open_folder", "open_project_in"})
 # per request (each request runs in its own task), so overlapping requests can't mix projects up
 _project_hit: ContextVar[Path | None] = ContextVar("project_hit", default=None)
+# milliseconds spent waiting on the model during this request (for the timing log row)
+_model_ms: ContextVar[int] = ContextVar("model_ms", default=0)
 # the Quick asks node lists these exact commands
 ASK_ITEMS = {"weather": "what is the weather", "usage": "how many calls today"}
 
@@ -232,8 +234,11 @@ class Orchestrator:
         text = " ".join(text.split())[:500]
         if not text:
             return Reply("I didn't catch that.", "empty", ok=False, understood="empty")
+        t_start = time.monotonic()
+        _model_ms.set(0)
         history = self._recent(session)  # first: an idle timeout also drops the "that project" follow-up
         intent = route(text, self.settings, self.registry, last_project=self._last_project)
+        router_ms = timed_ms(t_start)
         understood = describe_intent(intent)
         if intent.kind == "reset_session":
             self.reset_session(session)
@@ -245,6 +250,12 @@ class Orchestrator:
         if reply.focus is None:
             reply.focus = self._focus_for(intent, reply)
         self._remember(session, text, reply.text)
+        # timing only: intent kind and milliseconds, never the user's words
+        self.audit.log_action(
+            "timing",
+            f"{intent.kind} | router {router_ms} ms | model {_model_ms.get()} ms | total {timed_ms(t_start)} ms",
+            "ok",
+        )
         return reply
 
     def _focus_for(self, intent: Intent, reply: Reply) -> dict | None:
@@ -320,8 +331,10 @@ class Orchestrator:
                     out = await self.provider.complete(prompt)
             except LLMError:
                 self.audit.log_llm(self.provider.name, False, timed_ms(start), len(prompt), 0)
+                _model_ms.set(_model_ms.get() + timed_ms(start))
                 raise
             self.audit.log_llm(self.provider.name, True, timed_ms(start), len(prompt), len(out))
+            _model_ms.set(_model_ms.get() + timed_ms(start))
             return out
 
     def _pick_project(self, intent: Intent):
@@ -606,6 +619,15 @@ class Orchestrator:
             )
         if sub == "thanks":
             return Reply("You're welcome.", "quick_reply")
+        if sub == "name":
+            return Reply("I'm Nightmare, your local assistant for projects, reminders and apps.", "quick_reply")
+        if sub == "unknown_app":
+            app = intent.query or "That app"
+            return Reply(
+                f"{app} isn't in your allowed apps. Add it in Settings (say \"open settings\") and I can open it.",
+                "quick_reply",
+                ok=False,
+            )
         return Reply(
             "I'm here and listening. Ask for a project's progress, weather, reminders, or open an app.",
             "quick_reply",

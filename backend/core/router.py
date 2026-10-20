@@ -114,6 +114,20 @@ QUICK_THANKS_RE = re.compile(
     r"^\s*(?:thank\s+you|thanks)(?:\s+so\s+much|\s+a\s+lot)?(?:\s+nightmare)?\s*[?.!]*$",
     re.I,
 )
+QUICK_NAME_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:what(?:'s|\s+is|\s+s)\s+your\s+name(?:\s+again)?"
+    r"|who\s+are\s+you|what\s+are\s+you|what\s+should\s+i\s+call\s+you)\s*[?.!]*$",
+    re.I,
+)
+# well-known desktop programs; if one is asked for and is not in apps.json, say so at once
+# instead of spending ~12 s on the model just to be told no
+UNLISTED_APP_NAMES = {
+    "word": "Microsoft Word", "microsoft word": "Microsoft Word", "ms word": "Microsoft Word",
+    "powerpoint": "PowerPoint", "microsoft powerpoint": "PowerPoint", "power point": "PowerPoint",
+    "excel": "Excel", "microsoft excel": "Excel", "outlook": "Outlook", "teams": "Teams",
+    "onenote": "OneNote", "photoshop": "Photoshop", "discord": "Discord", "zoom": "Zoom",
+    "steam": "Steam", "vlc": "VLC", "obs": "OBS", "slack": "Slack", "telegram": "Telegram",
+}
 GIT_STATUS_RE = re.compile(
     r"\b(?:git\s+(?:status|branch)|what\s+branch\s+is|uncommitted\s+changes)\b",
     re.I,
@@ -417,6 +431,8 @@ def route(
         return Intent("quick_reply", text, note_text="greet")
     if QUICK_THANKS_RE.match(text):
         return Intent("quick_reply", text, note_text="thanks")
+    if QUICK_NAME_RE.match(text):
+        return Intent("quick_reply", text, note_text="name")
 
     m_city_wx = CITY_WEATHER_RE.match(text)
     if m_city_wx and m_city_wx.group("city").lower() not in {"the", "what", "how", "today", "current", "check"}:
@@ -458,6 +474,12 @@ def route(
             return Intent("open_app", text, app_id=app_id)
         if has_project and not is_progress:
             return Intent("open_folder", text, resolution=res)
+
+    if OPEN_VERB.search(n) and not registry.find_app(n):
+        padded = f" {n} "
+        for alias in sorted(UNLISTED_APP_NAMES, key=len, reverse=True):
+            if f" {alias} " in padded:
+                return Intent("quick_reply", text, note_text="unknown_app", query=UNLISTED_APP_NAMES[alias])
 
     if ABOUT.search(n) and not PROGRESS.search(n):
         res = _resolve_with_followup(text, n, settings.desktop_root, last_project)

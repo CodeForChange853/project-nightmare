@@ -36,6 +36,7 @@ ACTION_GROUPS = {
     "access": ["login", "db_open", "db_close", "settings_open", "settings_save", "confirm"],
     "actions": ["open_app", "open_folder", "open_project_in", "run_task", "run_command", "open_url"],
     "reminders": ["add_note", "complete_note", "delete_note"],
+    "timing": ["timing"],  # per-answer router/model/total milliseconds (no user text)
 }
 PROBLEM_WORDS = ("fail", "error", "block", "limit", "cancel")
 

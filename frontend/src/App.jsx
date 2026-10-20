@@ -70,12 +70,12 @@ const SLEEP_AFTER_MS = 5 * 60 * 1000 // idle this long and Nightmare dozes off
 const WAKE_RE =
   /^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:wake\s+up|are\s+you\s+(?:awake|there)\s+nightmare|rise\s+and\s+shine)(?:[, ]+nightmare)?\s*[.?!]*$/i
 const SLEEP_RE =
-  /^\s*(?:(?:hey|ok)\s+)?(?:nightmare[, ]+)?(?:go\s+to\s+sleep|sleep(?:\s+now)?|take\s+a\s+nap|good\s*night)(?:[, ]+nightmare)?\s*[.?!]*$/i
+  /^\s*(?:(?:hey|ok)\s+)?(?:nightmare[, ]+)?(?:go\s+to\s+sleep|(?:mayor|major|may\s+or|to|go|2)\s+sleep|sleep(?:\s+now)?|take\s+a\s+nap|good\s*night)(?:[, ]+nightmare)?\s*[.?!]*$/i
 const GREETING = 'Hello, Nightmare is awake. What are we going to do today?'
 const HOME_RE =
   /^\s*(?:(?:hey|ok)\s+)?(?:nightmare[, ]+)?(?:(?:go\s+)?home|(?:go\s+)?full\s*screen|full\s+view|show\s+(?:me\s+)?everything|open\s+(?:the\s+)?full\s+(?:view|nightmare|screen))(?:[, ]+nightmare)?\s*[.?!]*$/i
 const MINI_RE =
-  /^\s*(?:(?:hey|ok)\s+)?(?:nightmare[, ]+)?(?:(?:go\s+)?mini|(?:go\s+)?small|small\s+window|mini\s+(?:mode|window|view)|minimi[sz]e(?:\s+nightmare)?)(?:[, ]+nightmare)?\s*[.?!]*$/i
+  /^\s*(?:(?:hey|ok)\s+)?(?:nightmare[, ]+)?(?:(?:go\s+|oo\s+|ou\s+|u\s+|you\s+|to\s+)?mini|(?:go\s+)?small|small\s+window|mini\s+(?:mode|window|view)|minimi[sz]e(?:\s+nightmare)?)(?:[, ]+nightmare)?\s*[.?!]*$/i
 
 /**
  * Open a website the backend chose (fixed https templates only) as a tab in this browser.
