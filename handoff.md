@@ -5,7 +5,7 @@ Both `handoff.md` and `newsession.md` are kept in sync so that a new coding sess
 
 ## 0. Quick Status Summary (for Nightmare's `progress` reader)
 
-- **Done recently:** Completed **Phase 1**, **Phase 1.5**, **Phase 2**, **Phase 3 (More tools + 3-Tier Speed & Model Routing + Calbayog Weather + `nightmare_helper.txt`)**, and the code side of **Phase 4 (Android phone over Tailscale)**.
+- **Done recently:** Completed **Phase 1**, **Phase 1.5**, **Phase 2**, **Phase 3 (More tools + 3-Tier Speed & Model Routing + Calbayog Weather + `nightmare_helper.txt`)**, **Phase 4 (Android phone over Tailscale, live on the user's phone)** and **Phase 6 (Polish)**. Phase 5 (local voice) is the only phase left.
   - **3-Tier Speed & Model Architecture:**
     - **Tier 0 (Instant Python, `<10ms`, 0 LLM calls):** Added `quick_reply` intent for greetings, time/date, and capabilities/help, alongside instant deterministic tools (weather, git status, reminders, project list, short `<=400` char `.md`/`.txt` files, cached handoff summaries).
     - **Tier 1 (Fast Model, `AGY_FAST_MODEL=gemini-3.8-flash-low`, ~8s):** Used with `--disable-slash-commands` for single-file summaries (`progress`, `read_doc`) and normal conversational questions.
@@ -28,8 +28,18 @@ Both `handoff.md` and `newsession.md` are kept in sync so that a new coding sess
     - `scripts/setup_tailscale.ps1`: checks Tailscale is installed and connected, reads the MagicDNS name from `tailscale status --json`, refuses if `NIGHTMARE_PHONE_PIN` is empty (warns if < 6 digits), runs `tailscale serve --bg --https=443 http://127.0.0.1:<port>` (tailnet only, **never Funnel**), writes `NIGHTMARE_ALLOWED_HOSTS` into `backend/.env` (UTF-8 without BOM, replaces the line in place), prints the phone URL. `-Restart` restarts the backend in the background, `-Status` shows the serve config, `-Off` stops serving and clears the host.
     - Frontend: `frontend/public/manifest.webmanifest` + `icon.svg` (Add to Home screen, standalone, dark theme colour), served by FastAPI from an allowlist (`ROOT_FILES`; nothing else at the dist root is served). Read-only sessions get no Apps/Tasks nodes and no "Open the database" quick ask (`applyFocus` ignores nodes that are not shown). Touch devices (`pointer: coarse`) get "Hold the eye" hints instead of "Hold Space". Below the `lg` breakpoint the phone item list is capped at 45dvh and scrolls on its own; tapping an item scrolls the Details panel into view, and a reply switches to Conversation and scrolls there (focus highlights scroll only the list, never the page).
     - Verified here: 150 tests pass; against a live backend on a spare port, proxied requests (Host + X-Forwarded-*) logged in as read-only with the laptop PIN, got `Secure` cookies, weather answered, `open notepad`/`/confirm`/`/db/open` refused, foreign Origin / other ts.net host / Origin over http got 403; phone-width layout (412 px) checked in Chrome, including tap -> Details and Git status -> Conversation; desktop arc renders with 3 nodes. **UNVERIFIED:** Tailscale itself (not installed on the laptop yet), real Android Chrome speech/TTS over HTTPS, Add to Home screen, whether tailscale serve keeps the Host header (both cases are handled).
-  - Test suite: **150 passed, 8 skipped** on Windows.
-- **What is next:** User installs Tailscale on laptop + phone, enables MagicDNS + HTTPS certificates, sets a 6+ digit `NIGHTMARE_PHONE_PIN`, runs `.\scripts\setup_tailscale.ps1 -Restart`, and tests on the phone (voice, TTS, read-only refusals). Then **Phase 5 (Local voice upgrade)** or **Phase 6 (Polish)**.
+    - **Live (2026-10-20, ~17:26):** Tailscale 1.104.1 on the laptop (`garcia2024.tail39da4a.ts.net`, serve -> `127.0.0.1:8010`), phone "Ehhtooo" (Android) on the tailnet, phone logins recorded as `remote:100.88.18.84 (readonly)`. First "webpage not available" was the phone not being on the tailnet yet. Phone sessions show only Projects / Reminders / Quick asks (Apps and Tasks are hidden in read-only sessions on purpose).
+  - **Android voice repetition fix (2026-10-20):** Android Chrome's continuous recognition returns every growing guess as its own result ("how", "how many", ...), and `useSpeech.js` joined them all, so the phone sent "how how many how many ... projects". New `frontend/src/utils/transcript.js` (`mergeTranscripts`) treats a result that repeats the previous piece (last word may be re-guessed) as a revision; desktop's consecutive pieces still join. Tested with the exact logged inputs (`npm test`). **UNVERIFIED on the phone after the fix.**
+  - **Phase 6: Polish (2026-10-20):**
+    - **Git:** the project is now a git repo (`main`), one commit per step. `.env`, `*.db`, `apps.json`, logs, backups are ignored. Stray `backend/app.json` (identical copy of apps.json, unused) deleted.
+    - **Packaging:** `scripts/install.ps1` (venv, pinned packages, `npm ci` + build, `backend/.env` from the example with a generated token and PIN prompts, `apps.json` from the example, `frontend/.env.local`, optional `-Autostart`, `-Shortcut` Chrome `--app` window, `-Dev`, `-NoPrompt`; re-runnable, never overwrites). Tested on a fresh clone: 68 s, then 150 tests passed there. `requirements.txt` pins exact runtime versions (httpx moved to runtime, weather needs it); `requirements-dev.txt` has pytest + playwright. `.env` helpers shared in `scripts/nightmare_env.ps1`.
+    - **Settings (apps.json editor):** "open settings" / "edit my apps and tasks" / `/settings` / sliders button -> typed PIN -> 10-minute token (`X-Settings-Token`, same `PinAccess` gate as the database). `GET/POST /settings/apps`, `POST /settings/apps/check` (dry run: `shutil.which`, command line, folder; never runs). `backend/core/apps_config.py` validates added/changed entries (ids `[a-z0-9-]`, argv list of plain strings without control chars, <= 20 parts, aliases, project must exist, timeout 1-600, flags bool, project_flag like `-d`), drops unknown keys, keeps untouched entries byte for byte. **Rules:** tasks added/changed in Settings always get `confirm: true`; apps whose program is a shell/script host (`SHELLS`: cmd, powershell, pwsh, python, node, wscript, mshta, rundll32, ...) always confirm. Save is atomic (temp + `os.replace`), last 5 backups in `backend/backups/`, 409 if the file changed on disk since loading, hot-reloads `Registry.replace()` and clears `PendingStore` (a waiting confirmation may describe the old entry). Read-only/phone sessions are refused. Voice can only open the panel. `SettingsPanel.jsx`: list + editor (program + one argument per line), Check, unsaved-change summary, Undo all, discard prompt on close.
+    - **Activity log viewer:** `GET /db/actions?group=&outcome=&q=&before=` (groups: access / actions / reminders / questions; outcome problems = fail/error/block/limit/cancel; search escapes LIKE wildcards; 100 per page). Database panel Activity tab has the filter bar, a "Phone" tag on `remote:` logins and "Load older".
+    - **Space key:** push-to-talk ignores Space inside any `role="dialog"`, so checkboxes and buttons in panels work with the keyboard.
+    - **Tests:** `backend/tests/test_settings.py` (20), `backend/tests/test_browser.py` (7 Playwright tests in the installed Chrome against an in-process server: PIN lock/unlock, command reply, click-to-confirm deny/approve, read-only phone PIN, 412 px touch layout, database activity filters, adding an app in Settings then "open paint"). The 6 agy-wrapper tests now run on Windows with a real `.exe` stand-in built by pip's distlib launcher; the detached-launch test runs on Windows too. `frontend/tests/transcript.test.mjs` via `npm test`.
+    - **Verified in Chrome** against throwaway servers using scratch copies of apps.json and the database: Settings add-task -> Check -> Save (file, backup, untouched entries kept, "run bims build" asks first without restart); Activity filters on a copy of the real log.
+  - Test suite: **185 passed, 1 skipped** on Windows (the skip is the symlink test, which needs Developer Mode); `npm test` 5 passed.
+- **What is next:** Reload Nightmare on the phone and check that voice no longer repeats words. Change both PINs to 6+ digits (both are short and easy to guess). Then **Phase 5 (Local voice upgrade)**: faster-whisper / Piper / wake word, or server-side speech-to-text if Android Web Speech is still unreliable.
 - **Blockers:** None.
 
 ---
@@ -103,30 +113,36 @@ project-nightmare/
   README.md  handoff.md  newsession.md  nightmare_helper.txt  .gitignore
   scripts/
     agy_smoke_test.py              # standalone check of agy from Python
+    install.ps1                    # one-command setup (-Dev, -Autostart, -Shortcut, -NoPrompt), re-runnable
+    nightmare_env.ps1              # shared Get-EnvValue / Set-EnvValue for backend/.env (no BOM)
     start_nightmare.ps1            # stops stale server on port, builds UI if needed & starts single server
     setup_tailscale.ps1            # tailscale serve HTTPS for the phone + NIGHTMARE_ALLOWED_HOSTS (-Status, -Off, -Restart)
     install_autostart.ps1          # registers Windows Task Scheduler "At log on" (pythonw)
     uninstall_autostart.ps1        # removes Task Scheduler task
   backend/
     __main__.py                    # `python -m backend`, binds 127.0.0.1, logs to backend/logs/nightmare.log
-    main.py                        # FastAPI: /login /logout /status /chat /confirm /audit + static dist
+    main.py                        # FastAPI: /login /logout /status /chat /confirm /audit /db/* /settings/* + static dist
     config.py                      # Settings.from_env(), reads backend/.env (PORT, PIN, FAST/SMART_MODEL, WEATHER_CITY)
-    .env.example  apps.example.json  requirements.txt
+    .env.example  apps.example.json  requirements.txt  requirements-dev.txt
+    backups/                       # last 5 apps.json versions saved by Settings (git-ignored)
     core/router.py                 # regex intent router (16 intents) + follow-up pronouns
     core/orchestrator.py           # handlers, 3-tier model dispatch, mtime cache, follow-up memory, readonly guard
-    core/actions.py                # Registry, plans, execute(), PendingStore
+    core/actions.py                # Registry (replace() hot-reload), plans, execute(), PendingStore (clear())
+    core/apps_config.py            # Settings: validate, describe_changes, atomic save + backups, check_entry, SHELLS
     core/llm.py                    # LLMProvider, AgyProvider (fast_model + smart_model), NoLLMProvider
     tools/fs_reader.py             # project matching, handoff/doc reader, git_info, project_cards
     tools/weather.py               # async weather fetcher (Open-Meteo + wttr.in + OpenWeather) with 10m cache
-    tools/audit.py                 # SQLite audit + LLM call counts/latency + notes/reminders table
-    tests/                         # 150 passed, 8 skipped on Windows
+    tools/audit.py                 # SQLite audit + LLM call counts/latency + notes/reminders + search_actions
+    tests/                         # 185 passed, 1 skipped on Windows (test_browser.py needs Playwright + Chrome)
   frontend/
     vite.config.js                 # dev proxy injects X-Nightmare-Token
     public/                        # manifest.webmanifest + icon.svg (copied to dist root, served via ROOT_FILES)
     dist/                          # production bundle served directly by FastAPI
     src/App.jsx  api.js            # builds graph categories from /status, PIN unlock, push-to-talk, confirm flow
     src/components/  Orb NodeGraph Dossier Terminal Composer Boot LockScreen ConfirmDialog StatusBar Background Icon
-    src/utils/       useSpeech.js (Google Web Speech recognition + TTS)  useMic.js
+                     DatabasePanel SettingsPanel HelpPanel CountUp
+    src/utils/       useSpeech.js (Google Web Speech recognition + TTS)  transcript.js (Android merge)  useMic.js
+    tests/           transcript.test.mjs (npm test, node:test)
 ```
 
 ## 7. Security model (keep these properties)
@@ -138,6 +154,7 @@ project-nightmare/
 - Login endpoint is rate-limited (5 failures per 60s -> HTTP 429) and issues `HttpOnly`, `SameSite=Strict` session cookies.
 - Read-only sessions (`NIGHTMARE_PHONE_PIN`) are blocked in the backend from running any action intent or calling `/confirm`.
 - Remote (Phase 4): only `tailscale serve` (never Funnel); remote requests need a `NIGHTMARE_ALLOWED_HOSTS` name and an `https://` Origin for it, and are capped to read-only whatever PIN/token/cookie they carry. Remote login cookies are `Secure`; rate limits are per phone.
+- Settings (Phase 6): typed PIN + 10-minute token, laptop full sessions only, voice can only open the panel. Every added/changed entry is validated; new/changed tasks and shell/script-host apps always need a click; saves are atomic, backed up, refuse to overwrite a hand edit, and clear waiting confirmations.
 - Everything logged to `backend/nightmare.db` and `backend/logs/nightmare.log`.
 
 ## 8. Roadmap & Phase Status
@@ -152,12 +169,12 @@ project-nightmare/
   - Reminders/notes in SQLite + UI reminders strip.
   - Usage panel with today/total calls and average LLM latency.
   - Full command reference in `nightmare_helper.txt`.
-- **Phase 4: Remote and Android phone — CODE DONE (2026-10-20), live phone test pending**
+- **Phase 4: Remote and Android phone — COMPLETED (2026-10-20), live on the user's phone**
   - HTTPS via Tailscale (`tailscale serve`, `scripts/setup_tailscale.ps1`), `NIGHTMARE_ALLOWED_HOSTS` + remote = read-only in `main.py`, phone layout fixes, home-screen manifest. Not done: server-side speech-to-text (moved to Phase 5 if Android Web Speech turns out unreliable).
 - **Phase 5: Voice upgrade**
   - Local speech-to-text (faster-whisper) and text-to-speech (Piper); wake word.
-- **Phase 6: Polish**
-  - Settings screen to edit `apps.json`, audit-log viewer, browser tests, packaging.
+- **Phase 6: Polish — COMPLETED (2026-10-20)**
+  - git repo, `install.ps1` + pinned requirements, Settings screen for `apps.json`, activity-log filters/search/paging, Playwright browser tests, Windows agy tests, Android transcript fix + `npm test`, README rewrite.
 
 ## 9. Commands cheat sheet (PowerShell, from `project-nightmare`)
 
@@ -174,8 +191,13 @@ project-nightmare/
 # Phone access over Tailscale (after installing Tailscale + setting NIGHTMARE_PHONE_PIN):
 .\scripts\setup_tailscale.ps1 -Restart     # also: -Status, -Off
 
-# Run backend tests (expect 150 passed, 8 skipped on Windows):
+# Fresh setup or repair (safe to re-run):
+.\scripts\install.ps1 -Dev
+
+# Run all tests (expect 185 passed, 1 skipped; includes 7 browser tests in Chrome, ~1 min):
 .\.venv\Scripts\python.exe -m pytest backend -q
+.\.venv\Scripts\python.exe -m pytest backend -q -m "not browser"   # fast
+cd frontend; npm test
 ```
 
 ## 10. Rules for every session

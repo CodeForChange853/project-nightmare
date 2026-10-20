@@ -1,106 +1,75 @@
-# Project Nightmare (backend v0)
+# Project Nightmare
 
-Local-only voice assistant backend. FastAPI on `127.0.0.1`, uses your signed-in
-**Antigravity CLI (`agy`)** / Google AI Pro account for summaries, no API key.
+A local voice assistant for one Windows laptop. Ask it, by voice or text, about the projects on your Desktop, your reminders, the weather, or to open allowlisted apps and run predefined tasks. Summaries and chat use your signed-in **Antigravity CLI (`agy`)** on the Google AI Pro subscription, with no API key and no separate billing. Your Android phone can use it read-only over Tailscale.
 
 ```
-transcript -> router (regex, no LLM) -> tool -> agy summarizes text -> reply
-                                          \-> allowlisted action (confirm if needed)
+voice / text -> router (regex, no LLM) -> read-only tool or allowlisted action (click to confirm)
+                                     \-> agy only summarizes text or chats; it never chooses an action
 ```
 
-## Setup (Windows PowerShell)
+The full command list is in `nightmare_helper.txt` (or type `/help`). Design notes and the phase log are in `handoff.md`.
+
+## Install (Windows PowerShell)
+
+Needs Python 3.11+, Node 20.19+ or 22.12+, Google Chrome, and `agy` signed in.
 
 ```powershell
 cd project-nightmare
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r backend\requirements.txt
-
-# 1. FIRST: check agy works from Python. Paste the output back into the chat.
-python scripts\agy_smoke_test.py
-
-# 2. Configure
-copy backend\.env.example backend\.env          # set NIGHTMARE_TOKEN (see comment inside)
-copy backend\apps.example.json backend\apps.json  # edit apps and tasks to match your machine
-
-# 3. Test and run
-python -m pytest backend -q
-python -m backend
+.\scripts\install.ps1                 # venv, packages, frontend build, backend\.env (asks for PINs), apps.json
+.\scripts\start_nightmare.ps1 -Background
 ```
 
-Try it (PowerShell):
+Open **http://127.0.0.1:<NIGHTMARE_PORT>** in Chrome and type your laptop PIN.
 
-```powershell
-$h = @{ "X-Nightmare-Token" = "<your token>" }
-Invoke-RestMethod http://127.0.0.1:8000/status -Headers $h
-Invoke-RestMethod -Method Post http://127.0.0.1:8000/chat -Headers $h -ContentType "application/json" `
-  -Body '{"text":"go to my desktop directory, look for the project name bims and tell me the progress of it"}'
-```
+`install.ps1` options: `-Autostart` (start at Windows log on), `-Shortcut` (a Desktop icon that opens Nightmare in its own Chrome window), `-Dev` (test tools). It is safe to run again: it only fills in what is missing and never overwrites `backend\.env` values or `apps.json`.
 
-If your Desktop is not at `C:\Users\<you>\Desktop` (OneDrive redirects it), set `DESKTOP_ROOT` in `.env`.
+## Everyday use
 
-## Frontend (second terminal)
+- **Talk:** hold the eye or Space, speak, release. Replies are read aloud (male/female voice, 0.9x to 1.5x).
+- **Type:** the command box; `/` lists slash commands (`/help`, `/clear`, `/reminders`, `/db`, `/settings`, `/sleep`).
+- **Apps and tasks:** "open settings" (or the sliders button) and type your PIN to add, change or remove what Nightmare may open or run. Changes work at once, without a restart.
+- **Database:** "database access open" + PIN shows reminders, the activity log (filter by logins, actions, reminders or questions; problems only; search) and model calls.
+- **Phone:** see "Phone access" below.
 
-Needs Node 20.19+ or 22.12+ (Vite 8).
+## Phone access (Tailscale, read-only)
 
-```powershell
-cd frontend
-copy .env.local.example .env.local   # same NIGHTMARE_TOKEN as backend\.env
-npm install
-npm run dev
-```
+1. Install Tailscale on the laptop and the phone with the same account; turn on MagicDNS and HTTPS Certificates in the admin console.
+2. Set `NIGHTMARE_PHONE_PIN` in `backend\.env` (6+ digits).
+3. `.\scripts\setup_tailscale.ps1 -Restart`, then open the printed `https://<laptop>.<tailnet>.ts.net/` in Chrome on the phone.
 
-Open **http://127.0.0.1:5173** in Chrome or Edge (voice input does not work in Firefox).
-
-- **Hold Space** (or the button) to talk, release to send. Typing in the box also works, and Space only talks when the box is not focused.
-- `agy` takes roughly 10 to 15 seconds per call, so the waveform switches to a scanning animation with a seconds counter while it thinks.
-- Actions that need confirmation open a dialog showing the exact command. **Only a click can approve** (voice cannot), Deny is focused by default, Esc denies, and it expires after 60 seconds.
-- The token lives only in `frontend/.env.local` (no `VITE_` prefix). The Vite dev server's proxy adds it to `/api/*` requests, so it is never sent to the browser.
-- Chrome and Edge do speech recognition in the vendor's cloud, so what you say is sent to Google/Microsoft. Typing avoids that.
-
-## What it can do now
-
-| Say | What happens |
-|---|---|
-| "progress of bims" / "status of citizen graph" | finds the folder, finds `handoff.md` (up to 2 levels deep), `agy` summarizes it |
-| "list my projects" | lists folders on the Desktop |
-| "open notepad" / "launch vs code" | opens an app from the `apps.json` allowlist |
-| "open the bims folder" | opens it in Explorer |
-| "open bims in vs code" | opens the project in an editor that has `"project_arg": true` |
-| "start the bims dev server" | runs a task from `apps.json`; asks for confirmation unless `"confirm": false` |
-| "run command ..." | off by default (`ALLOW_RAW_COMMANDS=1`); always asks for confirmation |
-| "how many calls today" | counts Nightmare's own `agy` calls (it cannot read your Pro quota) |
-| anything else | plain chat answer from `agy`, no actions possible |
-
-Actions that need confirmation return `needs_confirm: true` and a `pending_id`.
-The UI must show `action_label` (the exact command) and then `POST /confirm {"id", "approve"}`.
-Pending actions live on the server for 60 seconds, work once, and cannot be swapped for a different command.
+Everything that arrives through Tailscale is read-only, whichever PIN is typed: it can ask about projects, git status, documents, weather, reminders and chat, but cannot open, run, approve, open Settings or the database. `-Status` shows what is shared, `-Off` stops it.
 
 ## Safety model
 
-- **The LLM never decides what to do.** Routing is regex plus the `apps.json` allowlist. `agy` only summarizes text or chats, so a prompt injection inside a `handoff.md` cannot become a command.
-- **The LLM never gets a path or a shell.** Python resolves the folder, reads only a file named `handoff.md`, resolves symlinks and checks it is still under `DESKTOP_ROOT`.
-- **`agy` print mode auto-approves its own tools.** So `agy` runs from an empty scratch folder, the prompts forbid tools, and API-key env vars are scrubbed so it uses your subscription login.
-- **Local only.** `python -m backend` binds `127.0.0.1`. Every request needs the token header, a local `Host` (anti DNS-rebinding) and, if present, an allowed `Origin` (so other web pages in your browser cannot call it).
-- **Phone access only through Tailscale, read-only.** `tailscale serve` (tailnet only, never Funnel) proxies HTTPS to `127.0.0.1`. The tailnet name must be listed in `NIGHTMARE_ALLOWED_HOSTS`, and any request that arrives through the proxy gets a read-only session whichever PIN or token it uses. See `scripts/setup_tailscale.ps1`.
-- **No `shell=True`.** Programs start from an argv list. `.cmd`/`.bat` launchers reject special characters in arguments.
-- Every action and `agy` call is logged to `backend/nightmare.db` (`GET /audit`).
+- **The LLM never decides what to do.** Routing is regex plus the `apps.json` allowlist. `agy` only summarizes text or chats, and project files reach it as quoted data, so a prompt injection in a `handoff.md` cannot become a command.
+- **The LLM never gets a path or a shell.** Python resolves folders, opens only `handoff.md`, READMEs and safe `.md`/`.txt` files (no secrets, keys or `.env`), resolves symlinks and stays inside `DESKTOP_ROOT`. `agy` runs from an empty scratch folder with API-key variables removed.
+- **Bound to `127.0.0.1`.** Every request needs a session cookie (PIN login) or the token, a local `Host` (stops DNS rebinding) and, if sent, an allowed `Origin` (stops other web pages).
+- **Phone access only through Tailscale, read-only.** `tailscale serve` (tailnet only, never Funnel) proxies HTTPS to `127.0.0.1`. The tailnet name must be in `NIGHTMARE_ALLOWED_HOSTS`, and any request that comes through the proxy gets a read-only session whichever PIN or token it uses.
+- **Click to confirm.** Tasks ask before running unless set otherwise by hand; voice cannot approve. Tasks added or changed in Settings, and apps that start a shell or script host (`cmd`, `powershell`, `python`, ...), always ask.
+- **Settings and the database need the typed PIN** and lock again after 10 minutes. Voice can open the panels but not change anything. Saves are validated, atomic, backed up (last 5 in `backend\backups\`) and refuse to overwrite a hand edit.
+- **No `shell=True`.** Programs start from an argument list; `.cmd`/`.bat` launchers reject special characters.
+- Everything is logged to `backend\nightmare.db` (activity rows older than `LOG_RETENTION_DAYS` are pruned at startup).
 
-## Verified vs not verified
+## Development
 
-Verified:
-- **Your machine:** `agy` 1.4.2 returns output through plain subprocess capture (JSON and text, including a multi-line prompt with quotes and `& | %`).
-- **Linux, 61 tests:** routing, folder matching, path and symlink safety, token/origin/host checks, confirmation flow, audit log, and the `agy` wrapper against a fake `agy`.
-- **Linux, live servers:** the frontend builds; through the Vite proxy the token is injected, a foreign `Origin` and a foreign `Host` both get 403, and the token does not appear in the served code.
+```powershell
+.\scripts\install.ps1 -Dev
+.\.venv\Scripts\python.exe -m pytest backend -q                     # backend + browser tests (Chrome, ~1 min)
+.\.venv\Scripts\python.exe -m pytest backend -q -m "not browser"    # fast run, ~20 s
+cd frontend; npm test                                               # frontend unit tests
+npm run dev                                                         # Vite on :5173 (needs frontend\.env.local)
+```
 
-**Not verified, needs your machine:**
-- How the UI looks and behaves in a browser (no browser was available to me): waveform, mic access, Space-to-talk, confirm dialog.
-- Web Speech recognition and text-to-speech.
-- `os.startfile` launching `chrome.exe`, `code.cmd` and `npm.cmd` resolution, and Windows Terminal flags.
-- Opening the mic for the waveform while speech recognition also uses it. If recognition errors, tell me and I'll make the waveform simulated instead.
+Browser tests drive the built UI (`npm run build` first) in your installed Chrome through Playwright, against a backend running inside the test with a fake model and temporary files, so nothing real is opened or changed.
 
-## Next
-
-1. Run it and tell me what breaks.
-2. Weather and Google Calendar (read-only) as extra tools.
-3. Optional: wake word, local speech models.
+| Path | What |
+|---|---|
+| `backend/main.py` | FastAPI app, auth, host/origin checks, Settings and database endpoints |
+| `backend/core/router.py` | regex intent router |
+| `backend/core/orchestrator.py` | handlers, model tiers, caches, read-only guard |
+| `backend/core/actions.py` | allowlist registry, action plans, execution, pending confirmations |
+| `backend/core/apps_config.py` | Settings: validation, change list, atomic save, dry-run check |
+| `backend/core/llm.py` | `agy` wrapper |
+| `backend/tools/` | file reader, weather, SQLite audit and reminders |
+| `frontend/src/` | React UI (eye and graph, panels, speech) |
+| `scripts/` | install, start, autostart, Tailscale |
