@@ -51,9 +51,16 @@ class Registry:
     """apps.json: {"apps": {...}, "tasks": {...}}"""
 
     def __init__(self, data: dict | None = None):
+        self.replace(data)
+
+    def replace(self, data: dict | None) -> None:
+        """Swap in a new allowlist in place, so everything holding this registry sees it at once."""
         data = data or {}
         self.apps: dict = data.get("apps", {})
         self.tasks: dict = data.get("tasks", {})
+
+    def as_dict(self) -> dict:
+        return {"apps": self.apps, "tasks": self.tasks}
 
     @classmethod
     def load(cls, path: Path) -> "Registry":
@@ -262,6 +269,10 @@ class PendingStore:
         pid = secrets.token_urlsafe(9)
         self._items[pid] = (self._clock() + self.ttl, plan)
         return pid
+
+    def clear(self) -> None:
+        """Drop every waiting plan (the allowlist changed, so they may no longer match it)."""
+        self._items.clear()
 
     def pop(self, pid: str) -> ActionPlan | None:
         self._purge()

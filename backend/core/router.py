@@ -77,6 +77,16 @@ DB_CLOSE_RE = re.compile(
     r"|exit\s+(?:the\s+)?database|hide\s+(?:the\s+)?database)\s*[.!?]*$",
     re.I,
 )
+SETTINGS_OPEN_RE = re.compile(
+    LEAD
+    + r"(?:(?:open|show|unlock)\s+(?:me\s+)?(?:the\s+|my\s+)?(?:nightmare\s+)?settings|settings\s+open"
+    r"|(?:edit|change|manage)\s+(?:the\s+|my\s+)?(?:apps?|tasks?|allowlist|apps\.json)(?:\s+(?:and|&)\s+tasks?)?)\s*[.!?]*$",
+    re.I,
+)
+SETTINGS_CLOSE_RE = re.compile(
+    LEAD + r"(?:(?:close|exit|hide|lock)\s+(?:the\s+)?settings|settings\s+close)\s*[.!?]*$",
+    re.I,
+)
 WEATHER_RE = re.compile(
     r"\b(?:weather|temperature|forecast|is\s+it\s+(?:going\s+to\s+)?rain(?:ing)?|how\s+(?:hot|cold)\s+is\s+it)"
     r"(?:.*?\b(?:in|at|for)\s+(?P<city>[a-zA-Z][a-zA-Z\s]{1,30}))?",
@@ -256,7 +266,7 @@ def describe_intent(intent: Intent) -> str:
     if intent.kind in {"complete_note", "delete_note"}:
         target = f"#{intent.note_id}" if intent.note_id is not None else f"“{intent.note_text or '?'}”"
         return f"{intent.kind} → {target}"
-    if intent.kind in {"db_open", "db_close", "reset_session"}:
+    if intent.kind in {"db_open", "db_close", "settings_open", "settings_close", "reset_session"}:
         return intent.kind
     if intent.kind == "open_url":
         return f"open_url → {intent.site}" + (f" search “{intent.query}”" if intent.query else "")
@@ -371,6 +381,10 @@ def route(
         return Intent("db_open", text)
     if DB_CLOSE_RE.match(text):
         return Intent("db_close", text)
+    if SETTINGS_OPEN_RE.match(text):
+        return Intent("settings_open", text)
+    if SETTINGS_CLOSE_RE.match(text):
+        return Intent("settings_close", text)
 
     m_note = ADD_NOTE_RE.match(text)
     if m_note:

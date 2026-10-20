@@ -8,6 +8,7 @@ import hmac
 import secrets
 import time
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import BACKEND_DIR, Settings
-from .core.actions import Registry
+from .core import apps_config
+from .core.actions import ActionError, Registry
 from .core.llm import AgyProvider, LLMProvider, NoLLMProvider
 from .core.orchestrator import Orchestrator
 from .tools.audit import Audit
@@ -45,10 +47,22 @@ class LoginIn(BaseModel):
 
 
 DB_TOKEN_HEADER = "x-db-token"
+SETTINGS_TOKEN_HEADER = "x-settings-token"
 
 
-class DbAccess:
-    """Short-lived tokens for the database viewer, issued after the PIN is typed (never spoken)."""
+class SettingsIn(BaseModel):
+    apps: dict
+    tasks: dict
+    version: str = Field(min_length=1, max_length=64)
+
+
+class CheckIn(BaseModel):
+    kind: Literal["app", "task"]
+    spec: dict
+
+
+class PinAccess:
+    """Short-lived tokens for the database viewer and Settings, issued after the PIN is typed (never spoken)."""
 
     def __init__(self, ttl: int = 600):
         self.ttl = ttl
@@ -210,7 +224,8 @@ def create_app(
     audit.prune_actions(settings.log_retention_days)
     orchestrator = Orchestrator(settings, provider, registry, audit)
     sessions = SessionStore(ttl=settings.session_ttl)
-    db_access = DbAccess()
+    db_access = PinAccess()
+    settings_access = PinAccess()
     guard = make_guard(settings, sessions)
 
     app = FastAPI(title="Project Nightmare")
@@ -219,7 +234,7 @@ def create_app(
         allow_origins=list(settings.allowed_origins),
         allow_credentials=True,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "X-Nightmare-Token", "X-DB-Token"],
+        allow_headers=["Content-Type", "X-Nightmare-Token", "X-DB-Token", "X-Settings-Token"],
     )
 
     auth_router = APIRouter()
@@ -337,7 +352,7 @@ def create_app(
 
     def require_full(request: Request) -> None:
         if getattr(request.state, "role", "full") == "readonly":
-            raise HTTPException(403, "Database access is only available in a laptop session.")
+            raise HTTPException(403, "Only available in a laptop session, not a read-only one.")
 
     def require_db(request: Request) -> None:
         require_full(request)
@@ -345,22 +360,26 @@ def create_app(
         if not db_access.valid(request.headers.get(DB_TOKEN_HEADER, "")):
             raise HTTPException(403, "The database is closed. Say “database access open” to open it again.")
 
-    @api_router.post("/db/open")
-    async def db_open(body: LoginIn, request: Request):
+    def open_with_pin(body: LoginIn, request: Request, name: str, access: PinAccess) -> dict:
+        """Typed laptop PIN -> short-lived token for one panel. Rate-limited per device."""
         require_full(request)
-        key = f"db:{client_key(request, settings)}"
+        key = f"{name}:{client_key(request, settings)}"
         if not sessions.check_rate_limit(key):
-            audit.log_action("db_open", key, "rate_limited")
+            audit.log_action(f"{name}_open", key, "rate_limited")
             raise HTTPException(429, "Too many wrong PINs. Wait 60 seconds.")
         candidate = body.pin.strip().encode()
         expected = settings.pin or settings.api_token  # no PIN configured: the token is the secret
         if not hmac.compare_digest(candidate, expected.encode()):
             sessions.record_failure(key)
-            audit.log_action("db_open", key, "failed")
+            audit.log_action(f"{name}_open", key, "failed")
             raise HTTPException(403, "Wrong PIN.")
         sessions.clear_failures(key)
-        audit.log_action("db_open", key, "ok")
-        return {"ok": True, "token": db_access.open(), "expires_in": db_access.ttl}
+        audit.log_action(f"{name}_open", key, "ok")
+        return {"ok": True, "token": access.open(), "expires_in": access.ttl}
+
+    @api_router.post("/db/open")
+    async def db_open(body: LoginIn, request: Request):
+        return open_with_pin(body, request, "db", db_access)
 
     @api_router.post("/db/close")
     async def db_close(request: Request):
@@ -386,6 +405,67 @@ def create_app(
             raise HTTPException(404, "That reminder no longer exists.")
         audit.log_action("delete_note", f"#{note_id} (database viewer)", "ok")
         return {"ok": True, "deleted": deleted}
+
+    # ---- Settings: "open settings" -> PIN -> edit apps.json (laptop only, never by voice) ----
+
+    def require_settings(request: Request) -> None:
+        require_full(request)
+        if not settings_access.valid(request.headers.get(SETTINGS_TOKEN_HEADER, "")):
+            raise HTTPException(403, "Settings are locked. Say “open settings” to unlock them again.")
+
+    def read_apps_file() -> dict:
+        try:
+            return Registry.load(settings.apps_file).as_dict()
+        except ActionError as exc:
+            raise HTTPException(409, f"apps.json can't be read, fix it by hand first: {exc}")
+
+    @api_router.post("/settings/open")
+    async def settings_open(body: LoginIn, request: Request):
+        return open_with_pin(body, request, "settings", settings_access)
+
+    @api_router.post("/settings/close")
+    async def settings_close(request: Request):
+        settings_access.close(request.headers.get(SETTINGS_TOKEN_HEADER, ""))
+        return {"ok": True}
+
+    @api_router.get("/settings/apps")
+    async def settings_apps(request: Request):
+        require_settings(request)
+        try:
+            projects = [p.name for p in list_projects(settings.desktop_root)]
+        except PathError:
+            projects = []
+        return {
+            **read_apps_file(),
+            "version": apps_config.file_version(settings.apps_file),
+            "projects": projects,
+        }
+
+    @api_router.post("/settings/apps")
+    async def settings_save(body: SettingsIn, request: Request):
+        require_settings(request)
+        if body.version != apps_config.file_version(settings.apps_file):
+            raise HTTPException(409, "apps.json was changed outside Settings. Reload to see the newest version.")
+        current = read_apps_file()
+        try:
+            clean, notes = apps_config.validate(
+                {"apps": body.apps, "tasks": body.tasks}, settings.desktop_root, current
+            )
+        except apps_config.ConfigError as exc:
+            raise HTTPException(422, {"message": "Some entries need fixing.", "errors": exc.errors})
+        changes = apps_config.describe_changes(current, clean)
+        version = apps_config.file_version(settings.apps_file)
+        if changes:
+            version = apps_config.save(settings.apps_file, clean, settings.apps_file.parent / "backups")
+            registry.replace(clean)
+            orchestrator.pending.clear()  # a waiting confirmation may describe the old entry
+            audit.log_action("settings_save", "; ".join(changes)[:500], "ok")
+        return {"ok": True, **clean, "version": version, "changes": changes, "notes": notes}
+
+    @api_router.post("/settings/apps/check")
+    async def settings_check(body: CheckIn, request: Request):
+        require_settings(request)
+        return apps_config.check_entry(body.kind, body.spec, settings.desktop_root)
 
     # Mount routes both at root (for Vite proxy / tests) and under /api (for single-server mode)
     app.include_router(auth_router)

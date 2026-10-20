@@ -156,7 +156,8 @@ class Reply:
     action_label: str | None = None
     understood: str | None = None
     url: str | None = None  # the browser opens this in a new tab
-    ui: str | None = None  # a hint for the frontend: open_url | db_pin | db_close | clear | help
+    # a hint for the frontend: open_url | db_pin | db_close | settings_pin | settings_close | clear | help
+    ui: str | None = None
     # which graph node the reply is about, so the UI can light it up: {"node": ..., "item": ...}
     focus: dict | None = None
 
@@ -274,10 +275,11 @@ class Orchestrator:
                 ok=False,
                 understood=f"{understood} (blocked: read-only)",
             )
-        if readonly and intent.kind == "db_open":
-            self.audit.log_action("db_open", text, "blocked_readonly")
+        if readonly and intent.kind in {"db_open", "settings_open"}:
+            self.audit.log_action(intent.kind, text, "blocked_readonly")
+            what = "Database access is" if intent.kind == "db_open" else "Settings are"
             return Reply(
-                "Database access is only available in a laptop session, not a read-only one.",
+                f"{what} only available in a laptop session, not a read-only one.",
                 intent.kind,
                 ok=False,
                 understood=f"{understood} (blocked: read-only)",
@@ -732,6 +734,14 @@ class Orchestrator:
 
     async def _do_db_close(self, intent: Intent) -> Reply:
         return Reply("Database closed.", "db_close", ui="db_close")
+
+    async def _do_settings_open(self, intent: Intent) -> Reply:
+        # opening is all voice can do: every change is typed and clicked in the panel itself
+        self.audit.log_action("settings_open", "pin requested", "awaiting_pin")
+        return Reply("Type your PIN to open Settings.", "settings_open", ui="settings_pin")
+
+    async def _do_settings_close(self, intent: Intent) -> Reply:
+        return Reply("Settings closed.", "settings_close", ui="settings_close")
 
     async def _do_open_url(self, intent: Intent) -> Reply:
         self.audit.log_action("open_url", intent.url or "", "ok")
