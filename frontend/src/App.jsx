@@ -10,12 +10,15 @@ import HelpPanel from './components/HelpPanel'
 import Icon from './components/Icon'
 import LockScreen from './components/LockScreen'
 import NodeGraph from './components/NodeGraph'
+import SettingsPanel from './components/SettingsPanel'
 import StatusBar from './components/StatusBar'
 import Terminal from './components/Terminal'
 import { useRecognizer, useSpeaker } from './utils/useSpeech'
 
 let nextId = 1
 const isTyping = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+// inside a dialog Space belongs to its checkboxes and buttons, not push-to-talk
+const ownsSpace = (el) => isTyping(el) || Boolean(el?.closest?.('[role="dialog"]'))
 // phones have no Space bar to hold, so the hints talk about the eye instead
 const TOUCH = window.matchMedia('(pointer: coarse)').matches
 const HOLD = TOUCH ? 'Hold the eye' : 'Hold Space'
@@ -224,6 +227,8 @@ export default function App() {
   const [unread, setUnread] = useState(0)
   const [dbOpen, setDbOpen] = useState(false)
   const closeDbPanel = useCallback(() => setDbOpen(false), [])
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const closeSettingsPanel = useCallback(() => setSettingsOpen(false), [])
   const [helpOpen, setHelpOpen] = useState(false)
   const closeHelp = useCallback(() => setHelpOpen(false), [])
   const [asleep, setAsleep] = useState(false)
@@ -367,6 +372,7 @@ export default function App() {
           return
         }
         if (cmd === '/db') return setDbOpen(true)
+        if (cmd === '/settings') return setSettingsOpen(true)
         if (cmd === '/reminders') {
           clean = 'what are my reminders'
         } else if (cmd === '/sleep') {
@@ -454,6 +460,8 @@ export default function App() {
         if (res.needs_confirm) setPending({ id: res.pending_id, label: res.action_label })
         if (res.ui === 'db_pin') setDbOpen(true)
         if (res.ui === 'db_close') setDbOpen(false)
+        if (res.ui === 'settings_pin') setSettingsOpen(true)
+        if (res.ui === 'settings_close') setSettingsOpen(false)
         if (res.ui === 'help') setHelpOpen(true)
         // Always read the full generated reply aloud
         say(res.reply)
@@ -485,11 +493,11 @@ export default function App() {
   useEffect(() => {
     const id = setInterval(() => {
       const occupied = asleepRef.current || busyRef.current || pendingRef.current || lockedRef.current
-      if (occupied || dbOpen || helpOpen || speaking || offline) return
+      if (occupied || dbOpen || settingsOpen || helpOpen || speaking || offline) return
       if (Date.now() - lastActive.current > SLEEP_AFTER_MS) setAsleep(true)
     }, 5000)
     return () => clearInterval(id)
-  }, [dbOpen, helpOpen, speaking, offline])
+  }, [dbOpen, settingsOpen, helpOpen, speaking, offline])
 
   const decide = useCallback(
     async (approve) => {
@@ -527,12 +535,12 @@ export default function App() {
 
   useEffect(() => {
     const down = (e) => {
-      if (e.code !== 'Space' || e.repeat || isTyping(e.target)) return
+      if (e.code !== 'Space' || e.repeat || ownsSpace(e.target)) return
       e.preventDefault()
       press()
     }
     const up = (e) => {
-      if (e.code !== 'Space' || isTyping(e.target)) return
+      if (e.code !== 'Space' || ownsSpace(e.target)) return
       e.preventDefault()
       release()
     }
@@ -608,7 +616,14 @@ export default function App() {
   return (
     <div className="relative flex h-dvh flex-col overflow-y-auto lg:overflow-hidden">
       <Background />
-      <StatusBar status={status} locked={locked} lastAsked={lastAsked} onLogout={handleLogout} onRetry={refreshStatus} />
+      <StatusBar
+        status={status}
+        locked={locked}
+        lastAsked={lastAsked}
+        onLogout={handleLogout}
+        onRetry={refreshStatus}
+        onSettings={() => setSettingsOpen(true)}
+      />
 
       {locked ? (
         <LockScreen pin={pinInput} setPin={setPinInput} error={pinError} busy={busy} onSubmit={handleLogin} />
@@ -713,6 +728,7 @@ export default function App() {
 
       {pending && <ConfirmDialog action={pending} onApprove={approve} onDeny={deny} />}
       {dbOpen && !locked && <DatabasePanel onClose={closeDbPanel} />}
+      {settingsOpen && !locked && !readonly && <SettingsPanel onClose={closeSettingsPanel} />}
       {helpOpen && !locked && (
         <HelpPanel
           onClose={closeHelp}

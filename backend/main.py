@@ -439,6 +439,7 @@ def create_app(
             **read_apps_file(),
             "version": apps_config.file_version(settings.apps_file),
             "projects": projects,
+            "shells": sorted(apps_config.SHELLS),  # the UI shows these apps as always asking first
         }
 
     @api_router.post("/settings/apps")

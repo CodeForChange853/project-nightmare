@@ -1,6 +1,6 @@
 import Icon, { Sigil } from './Icon'
 
-export default function StatusBar({ status, locked, lastAsked, onLogout, onRetry }) {
+export default function StatusBar({ status, locked, lastAsked, onLogout, onRetry, onSettings }) {
   const online = Boolean(status)
   const readonly = status?.role === 'readonly'
   return (
@@ -48,6 +48,17 @@ export default function StatusBar({ status, locked, lastAsked, onLogout, onRetry
             <span className="h-2 w-2 rounded-full bg-smoke" />
             Backend offline
             <Icon name="refresh" size={13} />
+          </button>
+        )}
+        {online && !readonly && (
+          <button
+            type="button"
+            onClick={onSettings}
+            title="Settings: apps and tasks"
+            aria-label="Settings"
+            className="glass grid h-8 w-8 place-items-center rounded-full text-ash hover:text-ember"
+          >
+            <Icon name="sliders" size={15} />
           </button>
         )}
         {status?.auth_mode === 'session' && (

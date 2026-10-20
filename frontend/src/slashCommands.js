@@ -5,5 +5,6 @@ export const SLASH_COMMANDS = [
   { name: '/new', hint: 'Start a new session (same as /clear)' },
   { name: '/reminders', hint: 'Read your reminders' },
   { name: '/db', hint: 'Open the database (asks for your PIN)' },
+  { name: '/settings', hint: 'Edit the apps and tasks Nightmare may open or run (asks for your PIN)' },
   { name: '/sleep', hint: 'Put Nightmare to sleep until you say “Nightmare, wake up”' },
 ]

@@ -44,7 +44,21 @@ async function call(path, options = {}) {
   if (res.status === 502 || res.status === 504) {
     throw new Error('Backend is not answering. Is `python -m backend` running?')
   }
-  if (!res.ok) throw new Error(`Backend error ${res.status}`)
+  if (!res.ok) {
+    // 409 / 422 from Settings carry {message, errors: [...]} or a plain string
+    let detail
+    try {
+      detail = (await res.json())?.detail
+    } catch {
+      /* ignore */
+    }
+    const err = new Error(
+      typeof detail === 'string' ? detail : detail?.message || `Backend error ${res.status}`,
+    )
+    err.status = res.status
+    err.errors = Array.isArray(detail?.errors) ? detail.errors : []
+    throw err
+  }
   return res.json()
 }
 
@@ -74,3 +88,18 @@ export const getDbRecords = (token) => call('/db/records', { headers: dbHeaders(
 
 export const deleteDbNote = (token, id) =>
   call(`/db/notes/${encodeURIComponent(id)}/delete`, { method: 'POST', headers: dbHeaders(token) })
+
+// Settings (apps.json): same idea as the database, its own PIN-bought token
+const settingsHeaders = (token) => ({ 'X-Settings-Token': token })
+
+export const openSettings = (pin) => call('/settings/open', { method: 'POST', body: JSON.stringify({ pin }) })
+
+export const closeSettings = (token) => call('/settings/close', { method: 'POST', headers: settingsHeaders(token) })
+
+export const getAppsConfig = (token) => call('/settings/apps', { headers: settingsHeaders(token) })
+
+export const saveAppsConfig = (token, body) =>
+  call('/settings/apps', { method: 'POST', headers: settingsHeaders(token), body: JSON.stringify(body) })
+
+export const checkAppsEntry = (token, kind, spec) =>
+  call('/settings/apps/check', { method: 'POST', headers: settingsHeaders(token), body: JSON.stringify({ kind, spec }) })
