@@ -998,3 +998,99 @@ def test_api_endpoints_team_tracker(tmp_path: Path):
         assert r_open_l5.status_code == 200
         assert r_open_l5.json()["ok"] is True
 
+
+def test_voice_intent_and_file_opening_fixes(tmp_path: Path):
+    """Verifies fixes for open timeline in excel, wakeup/greet, model identity, usage quota and slide jump."""
+    import asyncio
+    from backend.core.orchestrator import Orchestrator
+    from backend.core.router import route
+    from backend.core.llm import NoLLMProvider
+    from backend.core.clearance import ClearanceManager, LEVEL_5
+
+    fixture_bytes = generate_citizengraph_v2_test_fixture()
+    xlsx_file = tmp_path / "CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx"
+    xlsx_file.write_bytes(fixture_bytes)
+
+    audit = Audit(tmp_path / "audit.db")
+    clearance = ClearanceManager()
+    settings = Settings(
+        desktop_root=tmp_path,
+        api_token="test_token_1234567890abcdef",
+        db_path=tmp_path / "audit.db",
+        team_excel_path=xlsx_file,
+    )
+    orch = Orchestrator(
+        settings=settings,
+        provider=NoLLMProvider(),
+        registry=Registry(),
+        audit=audit,
+        clearance=clearance,
+    )
+
+    # 1. Test "open citizengraph timeline in excel" intent routing & execution
+    i_excel = route("open citizengraph timeline in excel", settings, Registry())
+    assert i_excel.kind == "open_team_excel"
+
+    i_excel2 = route("open citizengraph thesis timeline in excel", settings, Registry())
+    assert i_excel2.kind == "open_team_excel"
+
+    i_excel3 = route("open timeline in excel", settings, Registry())
+    assert i_excel3.kind == "open_team_excel"
+
+    # Execution requires Level 5
+    rep_l1 = asyncio.run(orch.handle("open citizengraph timeline in excel", session="test_sess"))
+    assert rep_l1.ok is False
+    assert "Level 5" in rep_l1.text
+
+    clearance.set_level("test_sess", LEVEL_5)
+    with patch("backend.tools.file_navigator.safe_open_file", return_value=(True, "Opened file")):
+        rep_l5 = asyncio.run(orch.handle("open citizengraph timeline in excel", session="test_sess"))
+        assert rep_l5.ok is True
+        assert "CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx" in rep_l5.text
+        assert rep_l5.ui == "team_progress:excel"
+
+    # 2. Test Wakeup / Greet Intent (must NEVER route to sleep)
+    i_wake1 = route("wakeup", settings, Registry())
+    assert i_wake1.kind == "quick_reply"
+    assert i_wake1.note_text == "greet"
+
+    i_wake2 = route("Wake up. Nightmare wake up.", settings, Registry())
+    assert i_wake2.kind == "quick_reply"
+    assert i_wake2.note_text == "greet"
+
+    rep_wake = asyncio.run(orch.handle("wakeup", session="test_sess"))
+    assert "awake" in rep_wake.text.lower()
+    assert "sleep" not in rep_wake.text.lower()
+
+    # 3. Test Model Identity Intent
+    i_model = route("what model powers you", settings, Registry())
+    assert i_model.kind == "quick_reply"
+    assert i_model.note_text == "model_identity"
+
+    i_model2 = route("who trained you", settings, Registry())
+    assert i_model2.kind == "quick_reply"
+    assert i_model2.note_text == "model_identity"
+
+    rep_model = asyncio.run(orch.handle("what model powers you", session="test_sess"))
+    assert "not powered by any model" in rep_model.text
+    assert "trained by my developer" in rep_model.text
+
+    # 4. Test Usage & Quota:
+    # "how many calls today" -> matches usage, reply does NOT contain Google AI Pro quota sentence
+    i_usage = route("how many calls today", settings, Registry())
+    assert i_usage.kind == "usage"
+
+    rep_usage = asyncio.run(orch.handle("how many calls today", session="test_sess"))
+    assert "model calls" in rep_usage.text
+    assert "Google AI Pro quota" not in rep_usage.text
+
+    # "don't need to include this Google AI Pro quota" -> must NOT route to usage
+    i_no_usage = route("don't need to include this Google AI Pro quota", settings, Registry())
+    assert i_no_usage.kind != "usage"
+
+    # 5. Test PowerPoint "go to next slide 11"
+    i_ppt = route("go to next slide 11", settings, Registry())
+    assert i_ppt.kind == "ppt_control"
+    assert i_ppt.slide == 11
+
+

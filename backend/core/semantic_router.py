@@ -25,6 +25,11 @@ CANONICAL_INTENTS: dict[str, list[str]] = {
     ],
     "quick_reply:greet": [
         "hello nightmare", "hey nightmare", "are you there", "nightmare", "mic check", "testing mic",
+        "wake up", "wakeup", "wake up nightmare", "nightmare wake up", "wake up please",
+    ],
+    "quick_reply:model_identity": [
+        "what model powers you", "what model are you", "who powers you", "what model is powering you",
+        "who trained you", "who built you", "what model is running you", "are you chatgpt", "are you gemini",
     ],
     "quick_reply:help": [
         "what can you do", "help", "what is your capability", "what are your capabilities",
@@ -208,6 +213,11 @@ CANONICAL_INTENTS: dict[str, list[str]] = {
         "timeline changes from gdrive",
         "diff citizengraph timeline",
     ],
+    "open_team_excel": [
+        "open citizengraph timeline in excel", "open citizengraph thesis timeline in excel",
+        "open timeline in excel", "launch citizengraph timeline in excel",
+        "open team timeline in excel", "open thesis timeline in excel",
+    ],
     "approve_email": [
         "approve email", "send the reminder email", "approve team reminder",
         "approve the email draft", "confirm and send email",
@@ -280,7 +290,11 @@ class SemanticRouter:
             best_score = float(sims[best_idx])
 
             if best_score >= threshold:
-                return self._exemplar_intents[best_idx], best_score, self._exemplar_texts[best_idx]
+                matched_intent = self._exemplar_intents[best_idx]
+                # Guard: Never allow wake up queries to map to sleep mode
+                if "sleep" in matched_intent and any(w in clean.lower() for w in ("wake up", "wakeup", "wake")):
+                    return "quick_reply:greet", 0.95, "wake up nightmare"
+                return matched_intent, best_score, self._exemplar_texts[best_idx]
             return None
         except Exception as exc:
             logger.debug("Semantic matching failed: %s", exc)
@@ -343,6 +357,9 @@ def match_semantic_intent(text: str, threshold: float = 0.82) -> "Intent | None"
 
     if intent_key == "timeline_diff":
         return Intent("timeline_diff", text)
+
+    if intent_key == "open_team_excel":
+        return Intent("open_team_excel", text)
 
     if intent_key == "approve_email":
         return Intent("approve_email", text)

@@ -150,8 +150,7 @@ QUICK_HELP_RE = re.compile(
     re.I,
 )
 QUICK_GREET_RE = re.compile(
-    r"^\s*(?:hello|hi|hey|yo|good\s+(?:morning|afternoon|evening)|are\s+you\s+there|mic\s+check|testing)"
-    r"(?:\s+nightmare)?\s*[?.!]*$",
+    r"^\s*(?:(?:hey|hi|hello|yo)\s+)?(?:nightmare[, ]+)?(?:hello|hi|hey|yo|good\s+(?:morning|afternoon|evening)|are\s+you\s+there|mic\s+check|testing|wake\s*up|wakeup)(?:\s+nightmare)?(?:\s+(?:wake\s*up|wakeup))*\s*[?.!]*$",
     re.I,
 )
 QUICK_THANKS_RE = re.compile(
@@ -161,6 +160,12 @@ QUICK_THANKS_RE = re.compile(
 QUICK_NAME_RE = re.compile(
     r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:what(?:'s|\s+is|\s+s)\s+your\s+name(?:\s+again)?"
     r"|who\s+are\s+you(?:\s+again)?|what\s+are\s+you|what\s+should\s+i\s+call\s+you)\s*[?.!]*$",
+    re.I,
+)
+MODEL_IDENTITY_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:(?:what|which)\s+(?:ai\s+|llm\s+)?models?\s+(?:powers?|runs?|trains?|is\s+powering|is\s+running)\s+(?:you|nightmare)|"
+    r"what\s+(?:ai\s+|llm\s+)?model\s+are\s+you|"
+    r"who\s+(?:powers?|trained?|made|built|created)\s+(?:you|nightmare))\s*[?.!]*$",
     re.I,
 )
 # well-known desktop programs; if one is asked for and is not in apps.json, say so at once
@@ -265,7 +270,7 @@ PPT_OPEN_SLIDE_RE = re.compile(
 PPT_CONTROL_RE = re.compile(
     LEAD
     + r"(?:"
-    r"(?:go\s+to|jump\s+to|switch\s+to|move\s+to|show|display)\s+(?:the\s+)?slide\s+(?P<s1>\d+|[a-zA-Z]+)|"
+    r"(?:go\s+to|jump\s+to|switch\s+to|move\s+to|show|display)\s+(?:the\s+)?(?:next\s+|previous\s+)?slide\s+(?P<s1>\d+|[a-zA-Z]+)|"
     r"slide\s+(?P<s2>\d+)|"
     r"(?P<next>next\s+slide|advance\s+slide)|"
     r"(?P<prev>previous\s+slide|prev\s+slide|back\s+(?:one\s+)?slide)|"
@@ -316,6 +321,11 @@ APPROVE_EMAIL_RE = re.compile(
     r")\s*[.!?]*$",
     re.I,
 )
+OPEN_TIMELINE_EXCEL_RE = re.compile(
+    LEAD
+    + r"(?:open|launch)\s+(?:the\s+)?(?:citizengraph\s+)?(?:thesis\s+)?(?:team\s+)?timeline(?:\s+tracker)?\s+(?:in|on|with|using)\s+excel\s*[.!?]*$",
+    re.I,
+)
 GITHUB_CHECK_RE = re.compile(
     r"\b("
     r"check\s+(?:my\s+)?github(?:\s+repositories|\s+repos)?"
@@ -361,7 +371,11 @@ ABOUT = re.compile(
     r"what(?: is| s) (?:the |my )?(?:project )?\S+ (?:project|app|system)$"
     r")\b"
 )
-USAGE = re.compile(r"\b(usage|quota|how many (calls|requests|prompts))\b")
+USAGE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:check\s+|show\s+|what\s+(?:is|are)\s+|tell\s+me\s+)?(?:my\s+)?(?:(?:model|llm|api|call|request)\s+)*(?:usage|quota)\s*[?.!]*$|"
+    r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?how\s+many\s+(?:model\s+|api\s+)?(?:calls|requests|prompts)\s*(?:did\s+you\s+make\s*)?(?:today)?\s*[?.!]*$",
+    re.I,
+)
 FOLLOWUP_REF = re.compile(r"\b(it|its|that|this|there|the project|that project|this project|that folder|the folder)\b")
 
 # Websites open as a new tab in the browser showing Nightmare (the frontend does window.open),
@@ -520,6 +534,8 @@ def describe_intent(intent: Intent) -> str:
         if intent.note_text:
             detail += f" ({intent.note_text})"
         return f"open_file → {detail}"
+    if intent.kind == "open_team_excel":
+        return "open_team_excel → Microsoft Excel"
     if intent.kind == "github_check":
         return "github_check → tracked repos"
     return "chat (no command matched)"
@@ -908,6 +924,9 @@ def route(
     if diff_prog is not None:
         return diff_prog
 
+    if OPEN_TIMELINE_EXCEL_RE.match(text):
+        return Intent("open_team_excel", text)
+
     team_prog = _match_team_progress(text)
     if team_prog is not None:
         return team_prog
@@ -1016,6 +1035,8 @@ def route(
         return Intent("quick_reply", text, note_text="thanks")
     if QUICK_NAME_RE.match(text):
         return Intent("quick_reply", text, note_text="name")
+    if MODEL_IDENTITY_RE.match(text):
+        return Intent("quick_reply", text, note_text="model_identity")
 
     m_city_wx = CITY_WEATHER_RE.match(text)
     if m_city_wx and m_city_wx.group("city").lower() not in {"the", "what", "how", "today", "current", "check"}:

@@ -317,7 +317,12 @@ Write-Output "OK"
             if ppt.SlideShowWindows.Count > 0:
                 ppt.SlideShowWindows(1).View.Next()
             elif hasattr(ppt, "ActiveWindow") and ppt.ActiveWindow:
-                ppt.ActiveWindow.View.Next()
+                try:
+                    cur = ppt.ActiveWindow.View.Slide.SlideIndex
+                    if cur < ppt.ActivePresentation.Slides.Count:
+                        ppt.ActiveWindow.View.GotoSlide(cur + 1)
+                except Exception:
+                    ppt.ActiveWindow.View.Next()
             return True, "OK"
         except ImportError:
             pass
@@ -330,7 +335,13 @@ $ppt = [Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Applicatio
 if ($ppt.SlideShowWindows.Count -gt 0) {
     $ppt.SlideShowWindows.Item(1).View.Next()
 } elseif ($ppt.ActiveWindow -and $ppt.ActiveWindow.View) {
-    $ppt.ActiveWindow.View.Next()
+    try {
+        $cur = $ppt.ActiveWindow.View.Slide.SlideIndex
+        $max = $ppt.ActivePresentation.Slides.Count
+        if ($cur -lt $max) { $ppt.ActiveWindow.View.GotoSlide($cur + 1) }
+    } catch {
+        try { $ppt.ActiveWindow.View.Next() } catch {}
+    }
 }
 Write-Output "OK"
 """
@@ -343,7 +354,12 @@ Write-Output "OK"
             if ppt.SlideShowWindows.Count > 0:
                 ppt.SlideShowWindows(1).View.Previous()
             elif hasattr(ppt, "ActiveWindow") and ppt.ActiveWindow:
-                ppt.ActiveWindow.View.Previous()
+                try:
+                    cur = ppt.ActiveWindow.View.Slide.SlideIndex
+                    if cur > 1:
+                        ppt.ActiveWindow.View.GotoSlide(cur - 1)
+                except Exception:
+                    ppt.ActiveWindow.View.Previous()
             return True, "OK"
         except ImportError:
             pass
@@ -356,7 +372,12 @@ $ppt = [Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Applicatio
 if ($ppt.SlideShowWindows.Count -gt 0) {
     $ppt.SlideShowWindows.Item(1).View.Previous()
 } elseif ($ppt.ActiveWindow -and $ppt.ActiveWindow.View) {
-    $ppt.ActiveWindow.View.Previous()
+    try {
+        $cur = $ppt.ActiveWindow.View.Slide.SlideIndex
+        if ($cur -gt 1) { $ppt.ActiveWindow.View.GotoSlide($cur - 1) }
+    } catch {
+        try { $ppt.ActiveWindow.View.Previous() } catch {}
+    }
 }
 Write-Output "OK"
 """

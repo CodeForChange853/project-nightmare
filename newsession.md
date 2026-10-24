@@ -4,7 +4,27 @@ Last updated: 2026-10-24 (Asia/Manila). Keep both files identical after every mi
 
 ## 0. Quick status (read by Nightmare's own `progress` command)
 
-- **Done:** Phases 1, 1.5, 2, 3, 4, 6, plus small window/phone tabs, **Phase 7A**, **Phase 7C (memory)**, **Phase 7D (workspace awareness)**, **Semantic Intent Router (Solution A)**, **Enhancements 1-5 (Warmup, Voice Switching, Instant Memory, Project Count, Local RAG)**, **Phase 8A: 3-Tier Security Clearance Architecture (Level 1, Level 3, Level 5)**, **Phase 8B: Level 3 Smart File Navigator & GitHub Intelligence (Exact Bypass & Stateful Disambiguation Updated)**, **Phase 8C: Level 5 PowerPoint Exact-Slide Presenter & System Authority**, **Phase 8D: Level 5 Shared Drive Excel Timeline Sync, Team Quota Tracker, and 3-Day Stale Email Nudger**, and **Phase 8D-2: 4-Tab CitizenGraph Telemetry, GDrive Diff Engine & Level 5 Desktop Command Center**. Phone over Tailscale works live; the Android repeated-words fix is confirmed by the user.
+- **Done:** Phases 1, 1.5, 2, 3, 4, 6, plus small window/phone tabs, **Phase 7A**, **Phase 7C (memory)**, **Phase 7D (workspace awareness)**, **Semantic Intent Router (Solution A)**, **Enhancements 1-5 (Warmup, Voice Switching, Instant Memory, Project Count, Local RAG)**, **Phase 8A: 3-Tier Security Clearance Architecture (Level 1, Level 3, Level 5)**, **Phase 8B: Level 3 Smart File Navigator & GitHub Intelligence (Exact Bypass & Stateful Disambiguation Updated)**, **Phase 8C: Level 5 PowerPoint Exact-Slide Presenter & System Authority**, **Phase 8D: Level 5 Shared Drive Excel Timeline Sync, Team Quota Tracker, and 3-Day Stale Email Nudger**, **Phase 8D-2: 4-Tab CitizenGraph Telemetry, GDrive Diff Engine & Level 5 Desktop Command Center**, and **Activity Log Bugfixes & Voice Intent Hardening**. Phone over Tailscale works live; the Android repeated-words fix is confirmed by the user.
+- **Activity Log Bugfixes & Voice Intent Hardening done (2026-10-24, 343 backend tests [351 with browser], 5 frontend tests pass, UNVERIFIED live):**
+  - **CitizenGraph Timeline Excel Opener (`open_team_excel`, Level 5 required):**
+    - Voice commands: `"open citizengraph timeline in excel"`, `"open citizengraph thesis timeline in excel"`, `"open timeline in excel"`, `"launch citizengraph timeline in excel"`.
+    - Directly resolves `settings.team_excel_path` and launches Microsoft Excel on desktop via `safe_open_file`, returning `ui="team_progress:excel"` instead of confusingly opening unrelated files.
+  - **File Navigator Multi-Token Scoring & Partial Match Guard (`file_navigator.py`):**
+    - In `find_files`, multi-token queries penalize partial matches with missing distinctive tokens (`score = 0.40 + ratio * 0.15`), allowing `CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx` (score 0.913) to cleanly beat `NexEnroll_Development_Timeline.xlsx` (score < 0.50).
+    - Added partial match guard in `orchestrator.py` that refuses to blindly auto-open files on weak multi-token partial matches (`matched_tokens < total_query_tokens` and `score < 0.85`), asking the user for confirmation.
+    - Added automatic file index freshness checks in `find_files` (rescans allowed roots if cache is older than 3 minutes or tokens miss) and background file indexing on server boot (`backend/main.py`), keeping SQLite `indexed_files` warm and fresh.
+  - **Wakeup & Greet Intent Hardening (`router.py`, `semantic_router.py`):**
+    - `QUICK_GREET_RE` expanded to match `wakeup`, `wake up`, `Wake up. Nightmare wake up.`, returning instant awake reply ("I am awake and listening. What do you need?").
+    - Added semantic guard in `semantic_router.py` preventing wake queries from ever mapping to `quick_reply:sleep`.
+  - **Model Identity Persona (`router.py`, `orchestrator.py`, `semantic_router.py`):**
+    - `MODEL_IDENTITY_RE` handles `"what model powers you"`, `"what model are you"`, `"who trained you"`, returning deterministic response: `"I am not powered by any model; I am trained by my developer."`
+    - Injected instruction into `CHAT_PROMPT` for LLM fallback parity.
+  - **Usage & Quota Regex Hardening (`router.py`, `orchestrator.py`):**
+    - Replaced overly broad `\bquota\b` regex in `USAGE` with full question matching, preventing casual phrases like `"don't need to include this Google AI Pro quota"` from triggering `usage`.
+    - Omitted redundant Google AI Pro quota disclaimer from usage replies.
+  - **PowerPoint Controller Fixes (`ppt_controller.py`, `router.py`):**
+    - Fixed PowerShell COM script in `next_slide` and `previous_slide` to safely navigate slides in edit mode via `GotoSlide`, eliminating `[System.__ComObject] does not contain a method named 'Next'`.
+    - Updated `PPT_CONTROL_RE` to recognize `"go to next slide 11"` as slide 11.
 - **Phase 8D-2: 4-Tab CitizenGraph Telemetry, GDrive Diff Engine & Level 5 Desktop Command Center done (2026-10-24, 341 backend tests [349 with browser], 5 frontend tests pass, UNVERIFIED live):**
   - **4-Tab CitizenGraph Workbook Parsing (`backend/tools/team_tracker.py`, Level 5 required):**
     - Zero-dependency OpenXML parsing (`zipfile` + `xml.etree.ElementTree`) for `CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx` (and backward compatible with 18-task `NexEnroll_Development_Timeline.xlsx`).

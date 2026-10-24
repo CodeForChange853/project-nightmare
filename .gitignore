@@ -16,3 +16,8 @@ frontend/.env.local
 frontend/dist/
 backend/logs/
 backend/backups/
+credentials.json
+backend/credentials.json
+token.json
+backend/token.json
+

@@ -563,3 +563,58 @@ def test_exact_and_clear_winner_bypass_and_stateful_disambiguation(tmp_path, mon
     rep_exp = asyncio.run(orchestrator.handle("the first one", session=session_id))
     # Since choices are expired, choices are cleared and "the first one" falls back to chat
     assert orchestrator._pending_file_choices is None
+
+
+def test_citizengraph_vs_nexenroll_file_matching_and_guard(tmp_path, monkeypatch):
+    """Verifies that multi-token file queries match full token candidates and never auto-open partial matches."""
+    import asyncio
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+
+    f_cg = desktop / "CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx"
+    f_nex = desktop / "NexEnroll_Development_Timeline.xlsx"
+    f_cg.write_text("cg timeline")
+    f_nex.write_text("nex timeline")
+
+    db_path = tmp_path / "audit.db"
+    audit = Audit(db_path)
+    index_files(roots=[desktop], audit=audit)
+
+    # 1. find_files with both files indexed: CitizenGraph matches both 'citizengraph' and 'timeline'
+    matches = find_files("citizengraph timeline", ext_filter="excel", audit=audit, allowed_roots=[desktop])
+    assert len(matches) >= 1
+    top = matches[0]
+    assert top.filename == "CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx"
+    assert top.matched_tokens == 2
+
+    # 2. If only NexEnroll is indexed and user asks for 'citizengraph timeline', orchestrator partial guard triggers
+    db_path2 = tmp_path / "audit2.db"
+    audit2 = Audit(db_path2)
+    # Only index nexenroll
+    audit2.upsert_indexed_files([("NexEnroll_Development_Timeline.xlsx", "nexenroll_development_timeline", ".xlsx", str(f_nex), 1000)])
+
+    apps_file = tmp_path / "apps.json"
+    apps_file.write_text(json.dumps({"apps": {}, "tasks": {}}))
+    settings = Settings(desktop_root=desktop, api_token="t" * 32, db_path=db_path2, apps_file=apps_file)
+    clearance = ClearanceManager()
+    orch = Orchestrator(
+        settings=settings,
+        provider=NoLLMProvider(),
+        registry=Registry(),
+        audit=audit2,
+        clearance=clearance,
+    )
+    clearance.set_level("test_sess", LEVEL_3)
+
+    opened = []
+    if hasattr(os, "startfile"):
+        monkeypatch.setattr(os, "startfile", lambda p: opened.append(Path(p).name))
+    else:
+        monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: opened.append(Path(cmd[-1]).name))
+
+    rep = asyncio.run(orch.handle("find file related to citizengraph timeline and open in excel", session="test_sess"))
+    # Guard triggered: does not open NexEnroll blindly, rejects or asks for confirmation
+    assert rep.ok is False
+    assert "partially matched" in rep.text or "couldn't find" in rep.text.lower()
+    assert len(opened) == 0  # NexEnroll was NOT opened!
+

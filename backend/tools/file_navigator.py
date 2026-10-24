@@ -282,6 +282,10 @@ def _token_match(q_tok: str, stem_tok: str) -> bool:
     return False
 
 
+# Track when index was last refreshed
+_last_index_time: float = 0.0
+
+
 def find_files(
     query: str,
     ext_filter: str | list[str] | set[str] | None = None,
@@ -290,6 +294,7 @@ def find_files(
     allowed_roots: list[Path] | None = None,
 ) -> list[FileMatch]:
     """Finds matching indexed files using deterministic token + fuzzy score matching."""
+    global _last_index_time
     clean_q, query_exts = parse_file_query(query)
 
     effective_exts: set[str] = set()
@@ -316,8 +321,10 @@ def find_files(
         return []
 
     indexed = audit.get_indexed_files(effective_exts if effective_exts else None)
-    if not indexed and allowed_roots is not None:
+    now = time.monotonic()
+    if (not indexed or (now - _last_index_time > 180)) and allowed_roots is not None:
         index_files(roots=allowed_roots, audit=audit)
+        _last_index_time = now
         indexed = audit.get_indexed_files(effective_exts if effective_exts else None)
 
     clean_q_lower = clean_q.lower()
@@ -325,66 +332,90 @@ def find_files(
     q_tokens = [w for w in re.split(r"[^a-z0-9]+", clean_stem_lower) if len(w) >= 2]
     total_q_tokens = len(q_tokens)
 
-    matches: list[FileMatch] = []
-    for item in indexed:
-        stem = item["stem_lower"]
-        filename = item["filename"]
-        ext = item["ext"]
-        score = 0.0
-        exact_match = False
-        matched_tokens = 0
+    def _score_items(items):
+        res: list[FileMatch] = []
+        for item in items:
+            stem = item["stem_lower"]
+            filename = item["filename"]
+            ext = item["ext"]
+            score = 0.0
+            exact_match = False
+            matched_tokens = 0
 
-        # Exact match check against filename or stem
-        if (
-            clean_q_lower == filename.lower()
-            or clean_q_lower == stem
-            or clean_stem_lower == stem
-            or re.sub(r"[^a-z0-9]", "", clean_q_lower) == re.sub(r"[^a-z0-9]", "", filename.lower())
-            or re.sub(r"[^a-z0-9]", "", clean_stem_lower) == re.sub(r"[^a-z0-9]", "", stem)
-        ):
-            score = 1.0
-            exact_match = True
-            matched_tokens = total_q_tokens
-        else:
-            stem_tokens = [w for w in re.split(r"[^a-z0-9]+", stem) if len(w) >= 2]
-            matched_count = sum(1 for q_tok in q_tokens if any(_token_match(q_tok, s_tok) for s_tok in stem_tokens))
-            matched_tokens = matched_count
-            if total_q_tokens > 0:
-                ratio = matched_count / total_q_tokens
-                if ratio == 1.0:
-                    coverage = total_q_tokens / max(len(stem_tokens), total_q_tokens)
-                    score = 0.88 + (coverage * 0.10)
-                elif ratio >= 0.5:
-                    score = 0.65 + (ratio * 0.15)
-                elif any(tok in stem for tok in q_tokens):
-                    score = 0.60
+            # Exact match check against filename or stem
+            if (
+                clean_q_lower == filename.lower()
+                or clean_q_lower == stem
+                or clean_stem_lower == stem
+                or re.sub(r"[^a-z0-9]", "", clean_q_lower) == re.sub(r"[^a-z0-9]", "", filename.lower())
+                or re.sub(r"[^a-z0-9]", "", clean_stem_lower) == re.sub(r"[^a-z0-9]", "", stem)
+            ):
+                score = 1.0
+                exact_match = True
+                matched_tokens = total_q_tokens
+            else:
+                stem_tokens = [w for w in re.split(r"[^a-z0-9]+", stem) if len(w) >= 2]
+                matched_count = sum(1 for q_tok in q_tokens if any(_token_match(q_tok, s_tok) for s_tok in stem_tokens))
+                matched_tokens = matched_count
+                if total_q_tokens > 1:
+                    ratio = matched_count / total_q_tokens
+                    if ratio == 1.0:
+                        coverage = total_q_tokens / max(len(stem_tokens), total_q_tokens)
+                        score = 0.88 + (coverage * 0.10)
+                    elif ratio >= 0.5:
+                        # Partial match: query had multiple distinctive keywords, candidate only matched some
+                        score = 0.40 + (ratio * 0.15)
+                    elif any(tok in stem for tok in q_tokens):
+                        score = 0.35
+                    else:
+                        fuzzy = SequenceMatcher(None, clean_stem_lower, stem).ratio()
+                        if fuzzy >= 0.7:
+                            score = fuzzy * 0.60
+                elif total_q_tokens == 1:
+                    if matched_count == 1:
+                        coverage = 1.0 / max(len(stem_tokens), 1)
+                        score = 0.75 + (coverage * 0.15)
+                    elif any(tok in stem for tok in q_tokens):
+                        score = 0.60
+                    else:
+                        fuzzy = SequenceMatcher(None, clean_stem_lower, stem).ratio()
+                        if fuzzy >= 0.6:
+                            score = fuzzy * 0.85
                 else:
                     fuzzy = SequenceMatcher(None, clean_stem_lower, stem).ratio()
                     if fuzzy >= 0.6:
                         score = fuzzy * 0.85
-            else:
-                fuzzy = SequenceMatcher(None, clean_stem_lower, stem).ratio()
-                if fuzzy >= 0.6:
-                    score = fuzzy * 0.85
 
-        if score >= 0.5:
-            matches.append(
-                FileMatch(
-                    path=Path(item["full_path"]),
-                    filename=filename,
-                    ext=ext,
-                    score=round(score, 3),
-                    mtime_ns=item["mtime_ns"],
-                    matched_tokens=matched_tokens,
-                    total_query_tokens=total_q_tokens,
-                    exact_match=exact_match,
+            if score >= 0.5:
+                res.append(
+                    FileMatch(
+                        path=Path(item["full_path"]),
+                        filename=filename,
+                        ext=ext,
+                        score=round(score, 3),
+                        mtime_ns=item["mtime_ns"],
+                        matched_tokens=matched_tokens,
+                        total_query_tokens=total_q_tokens,
+                        exact_match=exact_match,
+                    )
                 )
-            )
+        res.sort(
+            key=lambda m: (m.exact_match, m.score, m.matched_tokens, m.mtime_ns),
+            reverse=True,
+        )
+        return res
 
-    matches.sort(
-        key=lambda m: (m.exact_match, m.score, m.matched_tokens, m.mtime_ns),
-        reverse=True,
-    )
+    matches = _score_items(indexed)
+
+    # Dynamic rescan fallback: if query didn't find all tokens and allowed_roots provided, refresh once
+    if (not matches or (matches and matches[0].matched_tokens < total_q_tokens)) and allowed_roots is not None:
+        now_call = time.monotonic()
+        if now_call - _last_index_time > 10:
+            index_files(roots=allowed_roots, audit=audit)
+            _last_index_time = now_call
+            refreshed = audit.get_indexed_files(effective_exts if effective_exts else None)
+            matches = _score_items(refreshed)
+
     return matches
 
 

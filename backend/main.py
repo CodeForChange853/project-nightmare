@@ -244,9 +244,16 @@ def create_app(
     async def lifespan(_app: FastAPI):
         task = None
         warmup_task = None
+        file_index_task = None
         try:
             from .core.semantic_router import warmup_semantic_router
             warmup_task = asyncio.create_task(asyncio.to_thread(warmup_semantic_router))
+        except Exception:
+            pass
+        try:
+            from .tools.file_navigator import index_files, get_allowed_roots
+            allowed_roots = get_allowed_roots(settings.desktop_root.parent)
+            file_index_task = asyncio.create_task(asyncio.to_thread(index_files, allowed_roots, audit))
         except Exception:
             pass
         if settings.summary_refresh_sec > 0:  # keeps handoff/README summaries fresh in the background
@@ -258,6 +265,8 @@ def create_app(
                 task.cancel()
             if warmup_task is not None and not warmup_task.done():
                 warmup_task.cancel()
+            if file_index_task is not None and not file_index_task.done():
+                file_index_task.cancel()
 
     app = FastAPI(title="Project Nightmare", lifespan=lifespan)
     app.add_middleware(

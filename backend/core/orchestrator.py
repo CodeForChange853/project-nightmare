@@ -121,6 +121,7 @@ The user asked: {question}
 
 CHAT_PROMPT = """You are Nightmare, a terse voice assistant. Do not use any tools, files or commands.
 You cannot save reminders or notes, set alarms, open anything or take any action yourself. Never say that you saved, noted, scheduled or will remind the user of something. If they want a reminder, tell them to say "remind me to" followed by the reminder.
+If asked what model powers you, what model you are, or who made you, reply: "I am not powered by any model; I am trained by my developer."
 Available Desktop projects: {projects}
 If the user is clearly asking what one of their projects is about, check a project's progress/status, list their projects, compare all projects, check weather, read a .md/.txt file in a project, or hear their reminders, output ONLY one of these exact lines and nothing else:
 INTENT:about:<project_name>
@@ -148,7 +149,7 @@ HISTORY_IDLE_SEC = 30 * 60  # after this long without talking, a new session sta
 ACTION_INTENTS = frozenset(
     {
         "open_app", "open_folder", "open_project_in", "run_task", "run_command",
-        "run_dev_task", "rerun_task", "open_file", "ppt_open_slide", "ppt_control", "system_authority",
+        "run_dev_task", "rerun_task", "open_file", "open_team_excel", "ppt_open_slide", "ppt_control", "system_authority",
     }
 )
 # these change what Nightmare remembers, so the phone (read-only) may not use them
@@ -259,7 +260,7 @@ NODE_FOR_INTENT = {
     "workspace_briefing": "projects", "workspace_changes": "projects", "work_priorities": "projects",
     "search_projects": "projects", "github_check": "projects", "team_progress": "projects", "timeline_diff": "projects",
     "open_app": "apps", "run_task": "tasks", "run_command": "tasks", "run_dev_task": "tasks", "rerun_task": "tasks",
-    "open_file": "tasks", "ppt_open_slide": "tasks", "ppt_control": "tasks", "system_authority": "tasks", "approve_email": "tasks",
+    "open_file": "tasks", "open_team_excel": "tasks", "ppt_open_slide": "tasks", "ppt_control": "tasks", "system_authority": "tasks", "approve_email": "tasks",
     "weather": "asks", "usage": "asks", "conversation_history": "asks", "voice_settings": "asks",
     "clearance_status": "asks", "clearance_prompt": "asks", "clearance_lockdown": "asks",
 }
@@ -1005,6 +1006,10 @@ class Orchestrator:
             )
         if sub == "thanks":
             return Reply("You're welcome.", "quick_reply")
+        if sub in ("greet", "wake"):
+            return Reply("I am awake and listening. What do you need?", "quick_reply", ui="wake")
+        if sub == "model_identity":
+            return Reply("I am not powered by any model; I am trained by my developer.", "quick_reply")
         if sub == "name":
             return Reply("I'm Nightmare, your local assistant for projects, reminders and apps.", "quick_reply")
         if sub == "sleep":
@@ -1437,6 +1442,20 @@ class Orchestrator:
             )
 
         top_match = matches[0]
+        # Partial match guard for single-match multi-token queries
+        if (
+            len(matches) == 1
+            and top_match.total_query_tokens > 1
+            and top_match.matched_tokens < top_match.total_query_tokens
+            and top_match.score < 0.85
+            and not getattr(top_match, "exact_match", False)
+        ):
+            return Reply(
+                f"I found {top_match.filename}, but it only partially matched '{query}'. Say 'open {top_match.filename}' to confirm.",
+                "open_file",
+                ok=False,
+            )
+
         self._pending_file_choices = None
         self._last_file_candidates = None
         try:
@@ -1668,6 +1687,26 @@ class Orchestrator:
             data=scan,
         )
 
+    async def _do_open_team_excel(self, intent: Intent) -> Reply:
+        from ..tools.file_navigator import safe_open_file, get_allowed_roots
+        excel_path = self.settings.team_excel_path
+        if not excel_path or not excel_path.is_file():
+            from ..tools.team_tracker import resolve_timeline_workbook
+            excel_path = resolve_timeline_workbook(self.settings.desktop_root, self.settings.team_excel_path)
+
+        if not excel_path or not excel_path.is_file():
+            return Reply("CitizenGraph timeline Excel file was not found on disk.", "open_team_excel", ok=False)
+
+        allowed_roots = get_allowed_roots(self.settings.desktop_root.parent)
+        try:
+            ok, msg = await asyncio.to_thread(safe_open_file, excel_path, allowed_roots)
+        except Exception as exc:
+            self.audit.log_action("open_file", f"{excel_path.name} ({exc})", "security_blocked")
+            return Reply(str(exc), "open_team_excel", ok=False)
+
+        self.audit.log_action("open_file", excel_path.name, "ok" if ok else "error")
+        return Reply(f"Opened {excel_path.name} in Microsoft Excel.", "open_team_excel", ok=ok, ui="team_progress:excel")
+
     async def _do_approve_email(self, intent: Intent) -> Reply:
         target_pid = None
         for pid, (exp, plan) in list(self.pending._items.items()):
@@ -1685,7 +1724,7 @@ class Orchestrator:
         avg_s = f"{c['avg_ms'] / 1000:.1f}s" if c.get("avg_ms") else "n/a"
         return Reply(
             f"Today I made {c['today_ok']} model calls and {c['today_failed']} failed. {c['total']} in total "
-            f"(average latency {avg_s}). That counts only my own calls; I can't read your Google AI Pro quota.",
+            f"(average latency {avg_s}).",
             "usage",
         )
 

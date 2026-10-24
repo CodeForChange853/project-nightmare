@@ -88,6 +88,7 @@ INTENT_CLEARANCE_MAP: dict[str, int] = {
     "system_authority": LEVEL_5,
     "team_progress": LEVEL_5,
     "timeline_diff": LEVEL_5,
+    "open_team_excel": LEVEL_5,
     "approve_email": LEVEL_5,
     "send_team_nudge": LEVEL_5,
 }
