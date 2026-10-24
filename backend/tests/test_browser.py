@@ -87,11 +87,23 @@ def page(browser, server):
     ctx.close()
 
 
-def unlock(page, server, pin=PIN, path="/"):
+def unlock(page, server, pin=PIN, path="/", elevate=True):
     page.goto(server.url + path)
     page.get_by_placeholder("PIN or token").fill(pin)
     page.get_by_role("button", name="Unlock").click()
     expect(page.get_by_role("button", name="Hold to talk").first).to_be_visible()
+    if elevate and pin == PIN and path == "/":
+        badge = page.get_by_role("button", name="L1 OBSERVER")
+        try:
+            badge.wait_for(state="visible", timeout=3000)
+            badge.click()
+            modal = page.get_by_role("dialog", name="LEVEL 3 (OPERATOR)")
+            modal.wait_for(state="visible", timeout=3000)
+            modal.get_by_placeholder("Enter 6-digit PIN...").fill(pin)
+            modal.get_by_role("button", name="Elevate to Level 3").click()
+            expect(page.get_by_role("button", name="L3 OPERATOR")).to_be_visible(timeout=5000)
+        except Exception:
+            pass
 
 
 def send(page, text):
@@ -208,7 +220,7 @@ def test_mini_window_home_and_back(browser, server):
 
 
 def test_database_viewer_and_activity_filters(page, server):
-    unlock(page, server)
+    unlock(page, server, elevate=False)
     send(page, "database access open")
     page.locator("#db-pin").fill(PIN)
     page.get_by_role("button", name="Open database").click()

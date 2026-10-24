@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+﻿import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import gsap from 'gsap'
 import { ScrambleTextPlugin } from 'gsap/ScrambleTextPlugin'
 import { Sigil } from './Icon'
@@ -24,7 +24,7 @@ export default function Boot({ done, onFinished }) {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const ctx = gsap.context(() => {
       if (!reduced) {
-        gsap.to(word.current, { duration: 1.3, scrambleText: { text: 'NIGHTMARE', chars: '▓▒░█#%&?ΔΞ', speed: 0.5 } })
+        gsap.to(word.current, { duration: 1.3, scrambleText: { text: 'NIGHTMARE', chars: 'â–“â–’â–‘â–ˆ#%&?Î”Îž', speed: 0.5 } })
         gsap.to('[data-boot-ring]', { rotate: 360, duration: 6, ease: 'none', repeat: -1, transformOrigin: '50% 50%' })
         gsap.from('[data-boot-sigil]', { scale: 0.6, opacity: 0, duration: 0.9, ease: 'expo.out' })
       } else {
@@ -94,7 +94,7 @@ export default function Boot({ done, onFinished }) {
           className="mt-8 font-display text-[44px] font-extrabold leading-none tracking-[0.28em] text-bone"
           aria-hidden
         >
-          {' '}
+          {'Â '}
         </p>
         <div className="mt-6 h-px w-56 overflow-hidden bg-vein">
           <div ref={bar} className="h-full origin-left scale-x-0 bg-gradient-to-r from-crimson to-ember" />

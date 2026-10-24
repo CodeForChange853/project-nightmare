@@ -1,4 +1,4 @@
-import Icon, { Sigil } from './Icon'
+﻿import Icon, { Sigil } from './Icon'
 
 /** The latest answer right under the eye (mini window, phone Talk tab), with Read aloud / Stop. */
 export default function AnswerCard({ entry, asked, busy, elapsed, speaking, onSpeak, onStop, empty, onMore, className = '' }) {

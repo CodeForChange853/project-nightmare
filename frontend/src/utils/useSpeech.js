@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useRef, useState } from 'react'
 import { mergeTranscripts } from './transcript'
 
 const Recognition =
@@ -99,7 +99,7 @@ export function useRecognizer({ onFinal }) {
     }
     rec.onerror = (event) => {
       if (event.error === 'no-speech') {
-        setError('no speech heard — check mic input or hold Space a moment longer')
+        setError('no speech heard â€” check mic input or hold Space a moment longer')
       } else if (event.error !== 'aborted') {
         setError(event.error)
       }
@@ -118,7 +118,7 @@ export function useRecognizer({ onFinal }) {
         setError('')
         onFinalRef.current?.(text)
       } else if (!gotResultRef.current) {
-        setError((prev) => prev || 'no speech heard — hold Space while speaking (use Google Chrome)')
+        setError((prev) => prev || 'no speech heard â€” hold Space while speaking (use Google Chrome)')
       }
     }
 

@@ -28,6 +28,8 @@ const PATHS = {
   search: 'M10.5 4.5a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM15 15l4.5 4.5',
   back: 'M14.5 6l-6 6 6 6',
   eye:'M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12zM12 9.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z',
+  shield: 'M12 3 4.5 6.5v5.2c0 4.8 3.2 8.7 7.5 10.3 4.3-1.6 7.5-5.5 7.5-10.3V6.5z',
+  x: 'M6.5 6.5l11 11M17.5 6.5l-11 11',
 }
 
 export default function Icon({ name, size = 16, className = '', strokeWidth = 1.6 }) {
@@ -49,20 +51,38 @@ export default function Icon({ name, size = 16, className = '', strokeWidth = 1.
   )
 }
 
-/** The Nightmare sigil: a blood moon cut by a slit pupil. */
-export function Sigil({ size = 28, className = '' }) {
+/** The Nightmare sigil: a blood moon cut by a slit pupil, evolving with clearance tier. */
+export function Sigil({ size = 28, className = '', clearanceLevel = 1 }) {
+  const isL5 = clearanceLevel === 5
+  const isL3 = clearanceLevel === 3
+  const gradId = `sigil-moon-l${clearanceLevel}`
   return (
     <svg aria-hidden width={size} height={size} viewBox="0 0 32 32" className={className}>
       <defs>
-        <radialGradient id="sigil-moon" cx="38%" cy="32%" r="75%">
-          <stop offset="0" stopColor="#ff8a95" />
-          <stop offset="0.45" stopColor="#dc143c" />
-          <stop offset="1" stopColor="#3a0610" />
+        <radialGradient id={gradId} cx="38%" cy="32%" r="75%">
+          <stop offset="0" stopColor={isL5 ? '#fff3b0' : isL3 ? '#ffd88a' : '#ff8a95'} />
+          <stop offset="0.45" stopColor={isL5 ? '#ff2a4b' : isL3 ? '#e8a33d' : '#dc143c'} />
+          <stop offset="1" stopColor={isL5 ? '#1c0207' : isL3 ? '#4a1208' : '#3a0610'} />
         </radialGradient>
       </defs>
-      <circle cx="16" cy="16" r="14.5" fill="none" stroke="#5c1a24" strokeWidth="1" />
-      <circle cx="16" cy="16" r="10" fill="url(#sigil-moon)" />
-      <path d="M16 7.5c2.2 2.6 2.2 14.4 0 17-2.2-2.6-2.2-14.4 0-17z" fill="#070203" />
+      <circle
+        cx="16"
+        cy="16"
+        r="14.5"
+        fill="none"
+        stroke={isL5 ? '#ffd166' : isL3 ? '#e8a33d' : '#5c1a24'}
+        strokeOpacity={isL5 ? 0.85 : isL3 ? 0.7 : 1}
+        strokeWidth={isL5 ? '1.3' : '1'}
+        strokeDasharray={isL5 ? '3 2' : isL3 ? '6 2' : undefined}
+      />
+      <circle cx="16" cy="16" r="10" fill={`url(#${gradId})`} />
+      {isL5 && <circle cx="16" cy="16" r="7.2" fill="#070203" stroke="#ffd166" strokeWidth="0.6" strokeOpacity="0.7" />}
+      <path
+        d="M16 7.5c2.2 2.6 2.2 14.4 0 17-2.2-2.6-2.2-14.4 0-17z"
+        fill="#070203"
+        stroke={isL5 ? '#ffd166' : isL3 ? '#ff8a47' : 'none'}
+        strokeWidth={isL5 ? '0.7' : isL3 ? '0.4' : '0'}
+      />
     </svg>
   )
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import gsap from 'gsap'
 import { closeDb, deleteDbFact, deleteDbNote, getDbActions, getDbRecords, openDb } from '../api'
 import Icon from './Icon'
@@ -238,7 +238,7 @@ export default function DatabasePanel({ onClose }) {
               disabled={busy || !pin.trim()}
               className="rounded-xl bg-gradient-to-b from-crimson to-[#9e0d2b] px-4 py-3 text-[14px] font-semibold text-white shadow-[0_10px_30px_-10px_rgba(220,20,60,0.8)] hover:brightness-110 disabled:opacity-40"
             >
-              {busy ? 'Checking…' : 'Open database'}
+              {busy ? 'Checkingâ€¦' : 'Open database'}
             </button>
           </form>
         ) : (
@@ -304,7 +304,7 @@ export default function DatabasePanel({ onClose }) {
                   type="search"
                   value={filters.q}
                   onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))}
-                  placeholder="Search…"
+                  placeholder="Searchâ€¦"
                   aria-label="Search the activity log"
                   className="min-w-0 flex-1 rounded-lg border border-scar/60 bg-abyss/70 px-2.5 py-1 text-[12px] text-bone outline-none placeholder:text-smoke focus:border-ember sm:max-w-[16rem]"
                 />
@@ -467,13 +467,13 @@ export default function DatabasePanel({ onClose }) {
                     disabled={loadingMore}
                     className="rounded-xl border border-scar/60 px-3 py-1.5 text-[12px] text-ash hover:text-bone disabled:opacity-40"
                   >
-                    {loadingMore ? 'Loading…' : `Load older (showing ${rows.length})`}
+                    {loadingMore ? 'Loadingâ€¦' : `Load older (showing ${rows.length})`}
                   </button>
                 </div>
               )}
             </div>
             <p className="border-t border-scar/40 px-5 py-2.5 text-[11px] text-smoke">
-              Say “database close”, press Esc, or use the close button. Access ends by itself when the timer runs out.
+              Say â€œdatabase closeâ€, press Esc, or use the close button. Access ends by itself when the timer runs out.
             </p>
           </>
         )}

@@ -1,88 +1,51 @@
 ===============================================================================
-PROJECT NIGHTMARE — VOICE & TEXT COMMAND HELPER (nightmare_helper.txt)
+PROJECT NIGHTMARE — DEVELOPER HELPER & VOICE & TEXT COMMAND HELPER (nightmare_helper.txt)
 ===============================================================================
-Last Updated: 2026-10-20
-
-HOW TO SPEAK TO NIGHTMARE & CUSTOMIZE VOICE
-- Open http://127.0.0.1:<NIGHTMARE_PORT> (or :5173 in dev mode) in GOOGLE CHROME.
-- Hold down the [Space] key (or hold the "Hold to Talk" button) while speaking,
-  then release when finished.
-- Toggle Google Web Speech recognition language between `mic: en-PH` (Philippine
-  English) and `mic: en-US` in the top status bar.
-- Toggle AI reading voice between Male and Female (`voice: male` / `voice: female`
-  in the top status bar, or say "switch to female voice" / "switch to male voice").
-- Change AI reading speed (`speed: 0.9x / 1x / 1.15x / 1.3x / 1.5x` in the top
-  status bar, or say "speak faster" / "speak slower" / "normal speed").
-- Nightmare automatically reads its full generated replies aloud sentence-by-sentence
-  (and every reply in the terminal log also has a `read aloud` button + `stop reading`
-  button while speaking).
-
-HOW SPEED & MODEL TIERS WORK
-- Tier 0 (Instant Python — <10ms, 0 model calls, uses no quota):
-  Greetings, time/date, help, listing projects, git branch/status, live weather,
-  adding/listing/completing/deleting reminders, opening apps/folders/websites,
-  the database viewer, reading short (<400 char) .md/.txt files, and cached
-  handoff summaries.
-- Tier 1 (Fast — `gemini-3.8-flash-low`, ~7-8s):
-  Single-project `handoff.md` and README summaries, longer `.md`/`.txt` document summaries,
-  and general questions.
-- Tier 2 (Deep — `gemini-3.8-flash-high`, slower than Tier 1):
-  Cross-project comparisons ("which project needs attention?") or whenever you
-  include "think deeply", "analyze deeply", or "use smart model".
-- Gemini 4 Argon is not used. Change models with AGY_FAST_MODEL / AGY_SMART_MODEL
-  in backend/.env (list the choices with `agy models`) and restart the backend.
-
-CONVERSATION MEMORY & SESSIONS
-- Nightmare remembers your last 6 exchanges in this login, so follow-ups like
-  "and what about the second one?" work in general questions.
-- Memory lives only in the running backend: it is forgotten after 30 minutes of
-  silence, when the backend restarts, or when you start a new session.
-- New session: say "new session" / "clear the conversation" / "start over",
-  or type /clear or /new. This also clears the conversation on screen.
-
-LONG-TERM MEMORY (laptop and phone can read; only the laptop can change it)
-- Facts: "remember that my defense is in March" / "keep in mind that I like dark mode".
-  Reminders still use "remind me to ..." or "remember to ...".
-- Hear them: "what do you remember" / "what have I told you" / "list my memories".
-- Remove one: "forget that my defense is in March" or "forget memory 3" (one at a time).
-- Facts stay until you forget them. They also show, with a Delete button, in the
-  database panel (tab Memory).
-- Saved conversations: your questions and answers (not PIN, database, settings, shell
-  or reminder commands) are kept in the local database for 90 days. Older days are
-  condensed into a short summary in the background. Only the memories related to your
-  current question go into the model's prompt.
-
-SLEEP & WAKE
-- After 5 minutes with no clicks, keys or replies, Nightmare falls asleep: the
-  graph folds away, the eye closes and the title reads "Sleeping". It never
-  sleeps while it is thinking, speaking, or a dialog is open.
-- Sleep now: say "go to sleep" / "good night", or type /sleep.
-- Wake: hold Space and say "Nightmare, wake up" (also "hey nightmare wake up").
-  It answers "Hello, Nightmare is awake. What are we going to do today?" and the
-  graph opens again. Any other command also wakes it and runs as usual.
-- Sleep and wake are handled in the browser and use no model calls.
-
-GRAPH HIGHLIGHTS
-- When a reply is about a node, the graph switches to it, flashes its count, and
-  sends a spark from the eye along the line to that node. When it is about one
-  item (for example "what is the progress of citizengraph"), the spark continues
-  to that project, the arc scrolls to it, and it is selected in Details.
-- Reminders, Projects, Apps, Tasks and Quick asks (weather, usage) all do this.
-
-TYPED SHORTCUTS (TYPE "/" IN THE COMMAND BOX)
-- /help       show this command list (or say "help" / "what can you do")
-- /clear      clear the conversation and start a new session
-- /new        same as /clear
-- /reminders  read your reminders
-- /db         open the database (asks for your PIN)
-- /sleep      put Nightmare to sleep until you say "Nightmare, wake up"
+Last Updated: 2026-10-22
 
 -------------------------------------------------------------------------------
-1. PROJECT PROGRESS & HANDOFF SUMMARIES
+0. DEVELOPER HELPER FUNCTION (INTERACTIVE COMMAND REFERENCE)
 -------------------------------------------------------------------------------
-Purpose: Finds a project folder on your Desktop, reads its `handoff.md` safely,
-         and summarizes current status, recent work, next steps, and blockers.
-         Repeat checks on an unchanged file return instantly from cache.
+Purpose:
+  Opens the interactive Developer Helper UI overlay displaying all available voice
+  and text commands, their execution purpose, and click-to-run shortcuts.
+
+Voice / Text Commands:
+  - "open helper function"
+  - "nightmare open helper function"
+  - "open developer helper function"
+  - "developer helper function"
+  - "open helper"
+  - "help"
+  - "what can you do"
+
+-------------------------------------------------------------------------------
+1. HOW TO SPEAK TO NIGHTMARE & CUSTOMIZE VOICE
+-------------------------------------------------------------------------------
+Purpose:
+  Explains voice input, speech recognition toggles, AI reading voice switching,
+  and playback speed controls.
+
+Voice / Text Commands:
+  - "switch voice to female"
+  - "change female voice"
+  - "switch voice to male"
+  - "change male voice"
+  - "speak faster"
+  - "speak slower"
+  - "normal speed"
+
+Notes:
+  - Hold down [Space] (or the Orb eye button) while speaking, release when finished.
+  - Toggle speech recognition between `mic: en-PH` and `mic: en-US` in the status bar.
+  - Nightmare reads answers aloud sentence-by-sentence with read aloud / stop controls.
+
+-------------------------------------------------------------------------------
+2. PROJECT PROGRESS & HANDOFF SUMMARIES
+-------------------------------------------------------------------------------
+Purpose:
+  Finds a project on your Desktop, reads its handoff.md safely, and gives an instant
+  summary of current status, recent work, next steps, and blockers.
 
 Voice / Text Commands:
   - "progress of bims"
@@ -91,19 +54,19 @@ Voice / Text Commands:
   - "how is bims going"
   - "check on bims"
   - "what's going on with bims"
-  - "what is next for bims" / "what's the next task in citizengraph"
-  - "go to my desktop, find project bims and tell me the progress"
+  - "what is next for bims"
+  - "what's the next task in citizengraph"
 
-If a project has no handoff.md, Nightmare says so and tells you what git knows
-instead (branch, uncommitted files, last commit).
+Notes:
+  - Unchanged handoff files return instantly (<10ms) from SQLite cache.
+  - If no handoff.md exists, Git branch, dirty files, and last commit are reported.
 
 -------------------------------------------------------------------------------
-1b. WHAT A PROJECT IS ABOUT (README)
+3. WHAT A PROJECT IS ABOUT (README SUMMARY)
 -------------------------------------------------------------------------------
-Purpose: Reads the README.md (or readme.txt) at the top of a project folder and
-         says what the project is, who it is for, and what it is built with.
-         With no README it uses handoff.md instead. Repeat asks are instant
-         until the file changes.
+Purpose:
+  Reads README.md at the project root to describe what the project is, who it is for,
+  and what tech stack it uses.
 
 Voice / Text Commands:
   - "what is citizengraph all about"
@@ -113,11 +76,78 @@ Voice / Text Commands:
   - "describe bims"
 
 -------------------------------------------------------------------------------
-2. CROSS-PROJECT OVERVIEW (ALL PROJECTS)
+4. WORKSPACE AWARENESS (BRIEFING, RECENT CHANGES, WORK PRIORITIES)
 -------------------------------------------------------------------------------
-Purpose: Reads `handoff.md` across every project on your Desktop and uses the
-         Smart Model (`gemini-4-argon-medium`) to tell you which project needs
-         attention first and how all projects compare.
+Purpose:
+  Fast, plain Python background scans across all Desktop projects (no LLM latency).
+  Summarizes Git branches, dirty files, unpushed commits, TODOs, and priority rankings.
+
+Voice / Text Commands:
+  - "workspace briefing"
+  - "daily briefing"
+  - "give me a briefing"
+  - "workspace status"
+  - "what changed since yesterday"
+  - "changes since yesterday"
+  - "what did I change today"
+  - "what should I work on"
+  - "which project should I work on"
+  - "where should I start"
+
+-------------------------------------------------------------------------------
+5. LOCAL PROJECT KNOWLEDGE RAG (SEARCH CODE & DOCS)
+-------------------------------------------------------------------------------
+Purpose:
+  Semantic vector retrieval across safe project markdown and text documentation
+  using local FastEmbed ONNX embeddings in RAM.
+
+Voice / Text Commands:
+  - "search projects for authentication"
+  - "find in projects neo4j database"
+  - "search project docs for docker"
+  - "search all projects for api keys"
+  - "search project docs for login"
+
+Notes:
+  - Completely local: no cloud LLM latency, responds in ~15-30ms.
+  - Automatically caches file chunks by mtime.
+
+-------------------------------------------------------------------------------
+6. PROJECT LISTING & ACTIVE PROJECT COUNTS
+-------------------------------------------------------------------------------
+Purpose:
+  Instantly counts and lists all active project directories found on your Desktop.
+
+Voice / Text Commands:
+  - "how many active projects do I have"
+  - "how many projects do I have"
+  - "count my projects"
+  - "how many projects are there"
+  - "list my projects"
+  - "what projects are on my desktop"
+  - "show my projects"
+
+-------------------------------------------------------------------------------
+7. INSTANT CONVERSATION RECALL & SESSION MEMORY
+-------------------------------------------------------------------------------
+Purpose:
+  Recalls recent conversation topics from local SQLite history or resets session state.
+
+Voice / Text Commands:
+  - "earlier what we have discussed earlier"
+  - "what did we discuss earlier"
+  - "what was our previous conversation"
+  - "what did I ask earlier"
+  - "new session"
+  - "clear the conversation"
+  - "start over"
+
+-------------------------------------------------------------------------------
+8. CROSS-PROJECT COMPARISON (SMART MODEL)
+-------------------------------------------------------------------------------
+Purpose:
+  Reads handoff.md across all projects to compare status and pinpoint which project
+  needs immediate attention.
 
 Voice / Text Commands:
   - "which project needs attention?"
@@ -128,49 +158,23 @@ Voice / Text Commands:
   - "compare my projects"
 
 -------------------------------------------------------------------------------
-3. LIST DESKTOP PROJECTS
+9. SAFE DOCUMENT LOOKUP (.md & .txt FILES)
 -------------------------------------------------------------------------------
-Purpose: Instantly lists all project folders found on your Desktop.
+Purpose:
+  Searches up to 3 levels deep inside a project for safe documentation files.
+  Blocks secret keys, credentials, tokens, and .env files.
 
 Voice / Text Commands:
-  - "list my projects"
-  - "what projects are on my desktop"
-  - "show my projects"
-  - "projects on my desktop"
-
--------------------------------------------------------------------------------
-4. SAFE DOCUMENT LOOKUP (.md / .txt FILES)
--------------------------------------------------------------------------------
-Purpose: Searches up to 3 levels deep inside a Desktop project for a `.md` or `.txt`
-         file. Blocks secrets/keys (`.env`, `*password*`, `*secret*`, `*token*`,
-         `*.pem`, `*.key`, `id_rsa*`). Short files (<=400 chars) are read verbatim
-         instantly; longer files are summarized and cached.
-
-Voice / Text Commands:
-  - "open bims/docs, find file.md and tell me what is written"
   - "read readme.md in bims"
   - "find architecture.md in citizen graph"
   - "what is written in notes.txt in bims"
   - "read the readme file in project nightmare"
 
 -------------------------------------------------------------------------------
-5. FOLLOW-UP CONTEXT ("IT" / "THAT PROJECT")
+10. GIT BRANCH & STATUS
 -------------------------------------------------------------------------------
-Purpose: Remembers the last project you asked about so you don't have to repeat
-         the project name in your next sentence.
-
-Voice / Text Commands (after asking about e.g. `bims`):
-  - "open it in vs code"
-  - "open that folder"
-  - "what is its status"
-  - "read readme.md in it"
-  - "what branch is it on"
-
--------------------------------------------------------------------------------
-6. GIT BRANCH & UNCOMMITTED STATUS
--------------------------------------------------------------------------------
-Purpose: Instantly checks a project's current Git branch and how many uncommitted
-         or untracked files it has (`git status --porcelain --branch`).
+Purpose:
+  Checks current Git branch and uncommitted/untracked file counts for any project.
 
 Voice / Text Commands:
   - "what branch is bims on"
@@ -178,11 +182,11 @@ Voice / Text Commands:
   - "git branch of project nightmare"
 
 -------------------------------------------------------------------------------
-7. LIVE WEATHER (DEFAULT: CALBAYOG, OR ANY CITY)
+11. LIVE WEATHER FORECAST (CALBAYOG OR ANY CITY)
 -------------------------------------------------------------------------------
-Purpose: Fetches live temperature, feels-like, sky conditions, and humidity via
-         Open-Meteo / wttr.in (no API key required; cached for 10 minutes).
-         Default city is set to `Calbayog` (`WEATHER_CITY` in `backend/.env`).
+Purpose:
+  Fetches live temperature, feels-like, weather conditions, and humidity via Open-Meteo.
+  Default city is Calbayog.
 
 Voice / Text Commands:
   - "what is the weather"
@@ -193,145 +197,218 @@ Voice / Text Commands:
   - "is it going to rain in Calbayog"
 
 -------------------------------------------------------------------------------
-8. REMINDERS & NOTES (STORED IN SQLITE)
+12. REMINDERS & NOTES MANAGEMENT
 -------------------------------------------------------------------------------
-Purpose: Saves personal reminders/notes to `backend/nightmare.db`, shows them on
-         the Reminders node, reads them aloud with a count, marks them done, or
-         deletes them for good (by number or by what they are about).
+Purpose:
+  Saves personal reminders to SQLite, lists pending notes, marks items completed,
+  or deletes them.
 
 Voice / Text Commands:
-  - Add:      "remind me later that I have a class at 4pm"
-  - Add:      "remind me later for meeting with adviser"
-  - Add:      "remind me to submit thesis chapter 3" / "set a reminder to pay tuition"
-  - Add:      "add a note: test the login endpoint" / "note to self call advisor at 4pm"
-  - List:     "do I have any reminder today" / "what are my reminders"
-              "how many reminders do I have" / "show my reminders"
-  - Done:     "complete reminder 1" / "mark the class reminder as done"
-  - Delete:   "delete the class reminder" / "remove the meeting reminder"
-              "delete reminder 3" / "delete reminder number three"
-              (removes the database row; if two reminders match, Nightmare asks
-              which number; "delete all reminders" is refused, one at a time only)
+  - "remind me later that I have a class at 4pm"
+  - "remind me to submit thesis chapter 3"
+  - "set a reminder to pay tuition"
+  - "add a note: test the login endpoint"
+  - "what are my reminders"
+  - "do I have any reminder today"
+  - "complete reminder 1"
+  - "delete the class reminder"
+  - "delete reminder 3"
 
 -------------------------------------------------------------------------------
-8b. DATABASE ACCESS (PIN REQUIRED, LAPTOP FULL SESSION ONLY)
+13. LONG-TERM REMEMBERED FACTS (MEMORY)
 -------------------------------------------------------------------------------
-Purpose: Shows the SQLite records in `backend/nightmare.db`: reminders (with a
-         Delete button), the activity log, and model calls. You TYPE the PIN
-         (NIGHTMARE_PIN); it is never spoken or stored in the conversation.
-         Access closes by itself after 10 minutes.
+Purpose:
+  Stores persistent user facts and preferences that survive restarts and inject
+  context into future conversations.
 
 Voice / Text Commands:
-  - Open:   "database access open" / "open the database"
-  - Close:  "database close" / "close the database"  (or press Esc)
+  - "remember that my defense is in March"
+  - "keep in mind that I like dark mode"
+  - "what do you remember"
+  - "what have I told you"
+  - "list my memories"
+  - "forget that my defense is in March"
+  - "forget memory 3"
 
 -------------------------------------------------------------------------------
-9. OPEN APPS, FOLDERS, & PROJECTS IN EDITORS (LAPTOP FULL SESSION ONLY)
+14. OPEN APPS, FOLDERS, & VS CODE (LAPTOP ONLY)
 -------------------------------------------------------------------------------
-Purpose: Launches allowlisted desktop apps (`backend/apps.json`), opens project
-         folders in Windows Explorer, or opens a project inside VS Code.
-         (Blocked automatically when logged in with the read-only Phone PIN.)
-
-Voice / Text Commands:
-  - Open App:             "open notepad" / "open chrome" / "launch vs code"
-  - Open Project Folder:  "open project bims" / "open the bims folder"
-  - Open Project in App:  "open bims in vs code"
-
--------------------------------------------------------------------------------
-9b. OPEN WEBSITES & SEARCH IN THIS BROWSER
--------------------------------------------------------------------------------
-Purpose: Opens a website as a NEW TAB in the browser you are using Nightmare in
-         (not by launching the Chrome program), and can search inside it.
-         Known sites: YouTube, Google, Gmail, Google Maps/Drive/Docs/Classroom/
-         Calendar, Gemini, ChatGPT, GitHub, Stack Overflow, Wikipedia, Facebook,
-         Messenger, Instagram, TikTok, Reddit, LinkedIn, Netflix, Spotify, Canva,
-         Figma, Shopee, Lazada, or any "open example.com".
-         If Chrome blocks the new tab, the reply shows a link to open it.
+Purpose:
+  Opens allowlisted desktop apps (apps.json), opens folder in Explorer, or launches
+  projects directly in VS Code.
 
 Voice / Text Commands:
-  - "open youtube in this browser" / "open youtube"
-  - "open youtube and search lofi hip hop" / "search youtube for fastapi tutorial"
-  - "play never gonna give you up on youtube" / "play lofi on spotify"
-  - "google how to center a div" / "search for fastapi cookies"
+  - "open notepad"
+  - "open chrome"
+  - "launch vs code"
+  - "open folder bims"
+  - "open citizengraph in vs code"
+  - "open project nightmare in vs code"
+
+-------------------------------------------------------------------------------
+15. RUN PREDEFINED & AUTO-DETECTED DEV TASKS
+-------------------------------------------------------------------------------
+Purpose:
+  Executes package.json scripts (npm test, build, dev) or pytest with mandatory
+  click confirmation.
+
+Voice / Text Commands:
+  - "run bims tests"
+  - "run tests in citizengraph"
+  - "run it again"
+  - "rerun last task"
+
+-------------------------------------------------------------------------------
+16. OPEN WEBSITES & WEB SEARCH
+-------------------------------------------------------------------------------
+Purpose:
+  Opens safe website templates directly in a new browser tab.
+
+Voice / Text Commands:
+  - "open youtube and search lofi hip hop"
+  - "google fastembed onnx"
   - "open github.com"
+  - "open chatgpt"
+  - "open spotify"
 
 -------------------------------------------------------------------------------
-10. RUN PREDEFINED TASKS & COMMANDS (LAPTOP FULL SESSION ONLY)
+17. DATABASE & SETTINGS ACCESS (PIN REQUIRED)
 -------------------------------------------------------------------------------
-Purpose: Plans allowlisted project tasks from `backend/apps.json` (or raw commands
-         if `ALLOW_RAW_COMMANDS=1`). Tasks that require confirmation pop up a UI
-         dialog that can ONLY be approved by a physical mouse click.
+Purpose:
+  Opens the SQLite database viewer or allowlist settings panel. Requires typing
+  your PIN (never spoken).
 
 Voice / Text Commands:
-  - "start the bims dev server"
-  - "run bims git status"
-  - "run command <cmd>"  (disabled unless ALLOW_RAW_COMMANDS=1 in backend/.env)
+  - "database access open"
+  - "open the database"
+  - "open settings"
+  - "manage allowlist"
+  - "database close"
+  - "close settings"
 
 -------------------------------------------------------------------------------
-11. INSTANT UTILITY, USAGE & DEEP CHAT
+18. SYSTEM SLEEP, WAKE, & MINI WINDOW
 -------------------------------------------------------------------------------
-Purpose: Instant answers for time/date/help, model call tracking, or general AI Q&A.
+Purpose:
+  Controls standby state or summons the mini window via Ctrl+Alt+N.
 
 Voice / Text Commands:
-  - Time / Date:   "what time is it" / "what is the date today"
-  - Help:          "help" / "what can you do"
-  - Greeting:      "hello nightmare" / "are you there"
-  - Usage / Quota: "usage" / "how many calls did you make today"
-  - Fast Chat:     Ask any general question (uses `gemini-3.8-flash-low`)
-  - Deep Chat:     Include "think deeply" or "use smart model" in your question
-                   to force the smart model (`gemini-3.8-flash-high`).
+  - "go to sleep"
+  - "good night"
+  - "Nightmare, wake up"
+  - "home"
+  - "mini"
 
 -------------------------------------------------------------------------------
-12. USE NIGHTMARE FROM YOUR ANDROID PHONE (READ-ONLY, OVER TAILSCALE)
+19. 3-TIER SECURITY CLEARANCE (LEVEL 1, LEVEL 3, LEVEL 5)
 -------------------------------------------------------------------------------
-Purpose: Talk to Nightmare from your phone anywhere, through your private
-         Tailscale network (HTTPS, only your own devices; never the public
-         internet). Phone sessions are ALWAYS read-only, even if you type the
-         laptop PIN: progress, about, projects, git status, documents, weather,
-         reminders and chat work; opening apps/folders, running tasks,
-         approving dialogs and the database viewer do not.
+Purpose:
+  Controls the security clearance tier of Nightmare. Startup defaults to Level 1
+  (Observer, strictly read-only). Level 3 (Operator) unlocks memory writes, allowlisted
+  app launches, and dev tasks with a 6-digit PIN. Level 5 (Architect) unlocks raw shell
+  commands and system mutations with a secret password.
 
-One-time setup (on the laptop, PowerShell in the project folder):
-  1. Install Tailscale on the laptop (winget install --id Tailscale.Tailscale)
-     and on the phone (Play Store), signed in with the same account.
-  2. In the Tailscale admin console, DNS page: MagicDNS on, HTTPS Certificates on.
-  3. Set NIGHTMARE_PHONE_PIN in backend/.env (6+ digits).
-  4. .\scripts\setup_tailscale.ps1 -Restart
-     It prints the phone address, e.g. https://laptop.tail1234.ts.net/
+Voice / Text Commands:
+  - "nightmare open level 3"
+  - "elevate to level 3"
+  - "nightmare open level 5"
+  - "elevate to level 5"
+  - "what is my clearance level"
+  - "nightmare lock down"
+  - "drop to level 1"
 
-On the phone:
-  - Open that address in Chrome, log in with the phone PIN.
-  - The tab bar at the bottom: Talk / Projects / Reminders / Chat.
-      Talk       hold the big eye and speak; the answer appears right under it,
-                 with Read aloud / Stop; quick asks are buttons below.
-      Projects   search box + list; tap a project for its page (Read progress,
-                 What it's about, Git status). Android's back gesture closes it.
-      Reminders  your open reminders with a Done button.
-      Chat       the whole conversation and the text box.
-  - Chrome menu > "Add to Home screen" gives Nightmare its own icon.
-
-Laptop commands:
-  - .\scripts\setup_tailscale.ps1 -Status   what is being shared
-  - .\scripts\setup_tailscale.ps1 -Off      stop sharing (add -Restart to apply now)
+Notes:
+  - Level 3 decays to Level 1 after 30 minutes of inactivity.
+  - Level 5 decays to Level 1 after 10 minutes of inactivity or immediately on sleep mode.
+  - Remote Tailscale sessions are hard-capped at Level 1 Observer.
 
 -------------------------------------------------------------------------------
-13. SMALL ALWAYS-ON-TOP WINDOW (CTRL+ALT+N, LAPTOP)
+20. LEVEL 3 SMART FILE NAVIGATOR & GITHUB INTELLIGENCE
 -------------------------------------------------------------------------------
-Purpose: Summon a small Nightmare window over whatever you're doing, from any
-         app. A little helper (backend\hotkey.py) listens for the shortcut;
-         start_nightmare.ps1 starts it together with the backend.
-         Press once: the window opens bottom-right, on top, focused. Hold Space
-         (or the eye) to talk, or type. Press again while it's in front: it
-         hides. Press again: it comes back where you left it.
-         Change the shortcut with NIGHTMARE_HOTKEY in backend\.env
-         (e.g. ctrl+alt+m, win+shift+f9) or turn it off with "off", then run
-         .\scripts\start_nightmare.ps1 -Background.
+Purpose:
+  Safely indexes and opens safe files (.pptx, .ppt, .docx, .doc, .xlsx, .pdf, .txt, .md)
+  across Desktop, Documents, and Downloads. Performs remote updates, PR, and merge
+  conflict checks across tracked GitHub repositories. Requires Level 3 Operator access.
 
-Voice / Text Commands (in the small window):
-  - Full view:     "home" / "go home" / "full screen" / "show everything"
-                   (or the expand button). The window maximizes and stops
-                   staying on top.
-  - Small again:   "mini" / "small window" / "minimize", or press the shortcut.
+Voice / Text Commands:
+  - "find file related to timeline and open it in word or powerpoint"
+  - "open citizengraph ppt"
+  - "open budget in excel"
+  - "find file related to roadmap and open it"
+  - "check my github repositories for commits/pull requests/merge conflicts"
+  - "check github repositories"
+  - "check github"
+  - "github status"
 
-Start at Windows log on (backend + shortcut helper):
-  - .\scripts\install_autostart.ps1        (remove: .\scripts\uninstall_autostart.ps1)
+Notes:
+  - Strictly skips .git, node_modules, .venv, AppData, and secret files (.env, password, credential, pem, key).
+  - Path traversal and sensitive file access trigger a deterministic security block.
+  - Opening files is blocked on remote Tailscale sessions and requires Level 3+.
+
+-------------------------------------------------------------------------------
+21. LEVEL 5 POWERPOINT EXACT-SLIDE PRESENTER & SYSTEM AUTHORITY
+-------------------------------------------------------------------------------
+Purpose:
+  Provides exact slide jumping and presentation controls via Windows COM automation
+  (with zero-dependency XML slide parsing and PowerShell COM fallback). Executes
+  high-authority system controls (Nightmare background restart, PC restart, PC shutdown,
+  and cancel shutdown) requiring Level 5 Architect clearance and confirmation clicks.
+
+Voice / Text Commands:
+  - "find and open citizengraph ppt to powerpoint and show the slide 5"
+  - "open <query> presentation at slide <N>"
+  - "go to slide <N>"
+  - "next slide"
+  - "previous slide"
+  - "show the slide about <topic>"
+  - "rerun yourself"
+  - "restart nightmare"
+  - "restart my pc"
+  - "shut down my pc"
+  - "cancel shutdown"
+
+Notes:
+  - Strictly requires Level 5 (Architect) clearance. Blocked at Level 1 and Level 3.
+  - "rerun yourself", "restart my pc", and "shut down my pc" always require click confirmation (needs_confirm=True).
+  - PowerPoint slide XML parsing operates with zero pip dependencies using built-in zipfile + xml.etree.ElementTree.
+  - COM automation falls back seamlessly to PowerShell COM interop if pywin32 is not installed.
+
+-------------------------------------------------------------------------------
+22. LEVEL 5 SHARED DRIVE EXCEL TIMELINE SYNC, 4-TAB CITIZENGRAPH TELEMETRY & DIFF ENGINE
+-------------------------------------------------------------------------------
+Purpose:
+  Syncs development timelines, research milestones, and team quotas from shared Google Drive /
+  OneDrive Excel workbooks (CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx) using zero-dependency
+  OpenXML parsing (zipfile + xml.etree.ElementTree). Parses the exact 4-tab workbook structure:
+    1. General 8-Month Roadmap (STG-01..STG-09 across M1 Aug '26 - M8 Mar '27)
+    2. Detailed Weekly Gantt (21 tasks: 1.1..1.12 Phase 1 & 2.1..2.9 Phase 2, across 24 weekly spans)
+    3. Objectives & KPI Alignment (SO-1..SO-7 and architectural component mappings)
+    4. Phase Summary & Dashboard (live Python metric rollups and Chapter 1 quantitative benchmark targets)
+  Maintains baseline snapshots in SQLite (timeline_state table) and performs automated diff cross-referencing
+  against shared Google Drive sources, detecting status transitions, schedule shifts, and completion deltas.
+  Provides Level 5 Architect desktop-only telemetry command center in TeamProgressPanel.jsx with direct
+  "Open in Excel", "Sync Baseline", and SMTP reminder nudges.
+
+Voice / Text Commands:
+  - "nightmare what change in the citizengraph timeline from the gdrive"
+  - "what changed in the citizengraph timeline"
+  - "compare citizengraph timeline with gdrive"
+  - "check gdrive timeline updates"
+  - "what did my team update in the timeline"
+  - "show team progress"
+  - "open timeline tracker"
+  - "citizengraph timeline"
+  - "open citizengraph timeline in excel"
+  - "check team 1 progress"
+  - "approve email"
+  - "send reminder email"
+  - "/timeline"
+
+Notes:
+  - Strictly requires Level 5 (Architect) clearance. Blocked at Level 1 and Level 3, and blocked on remote sessions.
+  - Generates deterministic plain-Python spoken summaries of detected timeline diffs without cloud LLM overhead.
+  - "what changed in the citizengraph timeline" auto-opens TeamProgressPanel focused on Tab 5 (GDRIVE DIFF & TEAM SYNC).
+  - "open citizengraph timeline in excel" uses file_navigator.safe_open_file to launch the local .xlsx in Microsoft Excel.
+  - TeamProgressPanel.jsx renders exclusively for high-density desktop command-center viewports with GSAP tab transitions.
+  - Approving stale email reminders sends via SMTP; declining snoozes alerts for 24 hours in SQLite.
 ===============================================================================

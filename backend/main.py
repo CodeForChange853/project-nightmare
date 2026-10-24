@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from .config import BACKEND_DIR, Settings
 from .core import apps_config
 from .core.actions import ActionError, Registry
+from .core.clearance import ClearanceManager
 from .core.llm import AgyProvider, LLMProvider, NoLLMProvider
 from .core.orchestrator import Orchestrator
 from .tools.audit import Audit
@@ -46,6 +47,13 @@ class ConfirmIn(BaseModel):
 
 class LoginIn(BaseModel):
     pin: str = Field(min_length=1, max_length=128)
+
+
+class ElevateIn(BaseModel):
+    level: int = Field(ge=1, le=5)
+    pin: str = Field(default="", max_length=128)
+    password: str = Field(default="", max_length=128)
+    secret: str = Field(default="", max_length=128)
 
 
 DB_TOKEN_HEADER = "x-db-token"
@@ -225,7 +233,8 @@ def create_app(
     audit = Audit(settings.db_path)
     audit.prune_actions(settings.log_retention_days)
     audit.prune_conversations(settings.log_retention_days)  # raw chats expire; facts and day summaries stay
-    orchestrator = Orchestrator(settings, provider, registry, audit)
+    clearance = ClearanceManager()
+    orchestrator = Orchestrator(settings, provider, registry, audit, clearance=clearance)
     sessions = SessionStore(ttl=settings.session_ttl)
     db_access = PinAccess()
     settings_access = PinAccess()
@@ -234,6 +243,12 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         task = None
+        warmup_task = None
+        try:
+            from .core.semantic_router import warmup_semantic_router
+            warmup_task = asyncio.create_task(asyncio.to_thread(warmup_semantic_router))
+        except Exception:
+            pass
         if settings.summary_refresh_sec > 0:  # keeps handoff/README summaries fresh in the background
             task = asyncio.create_task(orchestrator.run_summary_refresher(settings.summary_refresh_sec))
         try:
@@ -241,6 +256,8 @@ def create_app(
         finally:
             if task is not None:
                 task.cancel()
+            if warmup_task is not None and not warmup_task.done():
+                warmup_task.cancel()
 
     app = FastAPI(title="Project Nightmare", lifespan=lifespan)
     app.add_middleware(
@@ -315,11 +332,18 @@ def create_app(
         except PathError:
             cards = []
             projects = []
+        session_key = getattr(request.state, "memory_key", "default")
+        remote = getattr(request.state, "remote", False) or is_remote(request, settings)
+        clear_lvl = clearance.get_level(session_key, is_remote=remote)
         return {
             "ok": True,
             "role": getattr(request.state, "role", "full"),
             "auth_mode": getattr(request.state, "auth_mode", "token"),
             "remote": getattr(request.state, "remote", False),
+            "clearance_level": clear_lvl,
+            "clearance_label": clearance.get_label(clear_lvl),
+            "clearance_expires_in": clearance.get_remaining_seconds(session_key, is_remote=remote),
+            "clearance_timeout": clearance.get_timeout_seconds(clear_lvl),
             "llm": provider.name,
             "desktop_root": str(settings.desktop_root),
             "projects": projects,
@@ -356,11 +380,201 @@ def create_app(
         if getattr(request.state, "role", "full") == "readonly":
             audit.log_action("confirm", body.id, "blocked_readonly")
             raise HTTPException(403, "Read-only session cannot approve actions")
-        return (await orchestrator.confirm(body.id, body.approve)).to_dict()
+        session_key = getattr(request.state, "memory_key", "default")
+        return (await orchestrator.confirm(body.id, body.approve, session=session_key)).to_dict()
+
+    # ---- Shared Drive Team Progress & Quota Tracker (Phase 8D) ----
+
+    @api_router.get("/team-tracker/progress")
+    async def team_tracker_progress(request: Request, team: str | None = None):
+        session_key = getattr(request.state, "memory_key", "default")
+        remote = is_remote(request, settings)
+        lvl = clearance.get_level(session_key, is_remote=remote)
+        if lvl < 5:
+            audit.log_action("team_progress", "GET /team-tracker/progress", "blocked_clearance")
+            raise HTTPException(403, "Team timeline tracking requires Level 5 access.")
+
+        from .tools.team_tracker import scan_team_progress
+        scan = await asyncio.to_thread(
+            scan_team_progress,
+            settings=settings,
+            audit=audit,
+            team_filter=team,
+        )
+        return scan
+
+    @api_router.post("/team-tracker/nudge")
+    async def team_tracker_nudge(body: dict, request: Request):
+        session_key = getattr(request.state, "memory_key", "default")
+        remote = is_remote(request, settings)
+        lvl = clearance.get_level(session_key, is_remote=remote)
+        if lvl < 5:
+            audit.log_action("send_team_nudge", f"nudge {body.get('task_id')}", "blocked_clearance")
+            raise HTTPException(403, "Generating reminder emails requires Level 5 access.")
+
+        task_id = body.get("task_id", "")
+        from .tools.email_notifier import create_nudge_email_draft
+        from .core.actions import plan_send_team_nudge
+
+        state = audit.get_team_task_state(task_id)
+        if not state:
+            raise HTTPException(404, f"Task {task_id} not found in state store.")
+
+        subj, email_body, _ = create_nudge_email_draft(
+            to_email=state["owner_email"],
+            assigned_team=state["assigned_team"],
+            task_name=state["task_name"],
+            current_count=state["current_count"],
+            target_count=state["target_count"],
+            days_stale=state["days_since_update"],
+        )
+        plan = plan_send_team_nudge(
+            task_id=state["task_id"],
+            assigned_team=state["assigned_team"],
+            owner_email=state["owner_email"],
+            task_name=state["task_name"],
+            current_count=state["current_count"],
+            target_count=state["target_count"],
+            days_stale=state["days_since_update"],
+            subject=subj,
+            body=email_body,
+        )
+        pid = orchestrator.pending.add(plan)
+        return {
+            "ok": True,
+            "pending_id": pid,
+            "label": plan.label,
+            "recipient": state["owner_email"],
+            "subject": subj,
+            "body": email_body,
+        }
+
+    @api_router.get("/team-tracker/diff")
+    async def team_tracker_diff(request: Request):
+        session_key = getattr(request.state, "memory_key", "default")
+        remote = is_remote(request, settings)
+        lvl = clearance.get_level(session_key, is_remote=remote)
+        if lvl < 5:
+            audit.log_action("timeline_diff", "GET /team-tracker/diff", "blocked_clearance")
+            raise HTTPException(403, "Timeline diff inspection requires Level 5 access.")
+
+        from .tools.team_tracker import scan_team_progress
+        scan = await asyncio.to_thread(scan_team_progress, settings=settings, audit=audit)
+        return scan.get("diff", {})
+
+    @api_router.post("/team-tracker/sync")
+    async def team_tracker_sync(request: Request):
+        session_key = getattr(request.state, "memory_key", "default")
+        remote = is_remote(request, settings)
+        lvl = clearance.get_level(session_key, is_remote=remote)
+        if lvl < 5:
+            audit.log_action("team_sync", "POST /team-tracker/sync", "blocked_clearance")
+            raise HTTPException(403, "Syncing timeline baseline requires Level 5 access.")
+
+        from .tools.team_tracker import scan_team_progress
+        await asyncio.to_thread(scan_team_progress, settings=settings, audit=audit)
+        count = audit.commit_timeline_baseline()
+        audit.log_action("team_sync", f"committed {count} baseline records", "ok")
+        return {
+            "ok": True,
+            "committed_count": count,
+            "message": f"Successfully updated baseline with {count} records.",
+        }
+
+    @api_router.post("/team-tracker/open-excel")
+    async def team_tracker_open_excel(request: Request):
+        session_key = getattr(request.state, "memory_key", "default")
+        remote = is_remote(request, settings)
+        lvl = clearance.get_level(session_key, is_remote=remote)
+        if lvl < 5:
+            audit.log_action("open_excel", "POST /team-tracker/open-excel", "blocked_clearance")
+            raise HTTPException(403, "Opening local timeline Excel requires Level 5 access.")
+
+        if remote:
+            audit.log_action("open_excel", "POST /team-tracker/open-excel", "blocked_remote")
+            raise HTTPException(403, "Opening files is blocked on remote sessions.")
+
+        from .tools.team_tracker import resolve_team_excel_path
+        from .tools.file_navigator import safe_open_file
+        excel_path = resolve_team_excel_path(settings)
+        if not excel_path or not excel_path.is_file():
+            raise HTTPException(404, "Timeline Excel file not found on disk.")
+
+        ok, msg = await asyncio.to_thread(safe_open_file, excel_path)
+        if not ok:
+            raise HTTPException(500, msg)
+        audit.log_action("open_excel", str(excel_path), "ok")
+        return {"ok": True, "message": msg}
 
     @api_router.get("/audit")
     async def recent():
         return {"actions": audit.recent_actions()}
+
+    # ---- 3-Tier Security Clearance (Phase 8A) ----
+
+    @api_router.post("/clearance/elevate")
+    async def clearance_elevate(body: ElevateIn, request: Request):
+        remote = is_remote(request, settings)
+        key = f"clearance:{client_key(request, settings)}"
+        session_key = getattr(request.state, "memory_key", "default")
+        candidate = body.password or body.pin or body.secret
+
+        if remote:
+            audit.log_action("clearance_elevate", f"L{body.level} from {key}", "blocked_remote")
+            raise HTTPException(403, "Remote sessions are hard-capped at Level 1.")
+
+        if not clearance.check_rate_limit(key):
+            audit.log_action("clearance_elevate", f"L{body.level} from {key}", "rate_limited")
+            raise HTTPException(429, "Too many failed clearance attempts. Wait 60 seconds.")
+
+        ok, msg = clearance.elevate(
+            session_id=session_key,
+            target_level=body.level,
+            candidate=candidate,
+            settings=settings,
+            is_remote=remote,
+            key=key,
+        )
+        if not ok:
+            audit.log_action("clearance_elevate", f"L{body.level} from {key}", "failed")
+            if "Too many" in msg:
+                raise HTTPException(429, msg)
+            raise HTTPException(401, msg)
+
+        audit.log_action("clearance_elevate", f"L{body.level} for {session_key}", "ok")
+        return {
+            "ok": True,
+            "level": body.level,
+            "label": clearance.get_label(body.level),
+            "expires_in": clearance.get_remaining_seconds(session_key, is_remote=remote),
+            "timeout": clearance.get_timeout_seconds(body.level),
+        }
+
+    @api_router.post("/clearance/lockdown")
+    async def clearance_lockdown(request: Request):
+        session_key = getattr(request.state, "memory_key", "default")
+        clearance.lock_down(session_key)
+        audit.log_action("clearance_lockdown", f"L1 for {session_key}", "ok")
+        return {
+            "ok": True,
+            "level": 1,
+            "label": clearance.get_label(1),
+            "expires_in": None,
+            "timeout": None,
+        }
+
+    @api_router.get("/clearance/status")
+    async def clearance_status(request: Request):
+        session_key = getattr(request.state, "memory_key", "default")
+        remote = is_remote(request, settings)
+        lvl = clearance.get_level(session_key, is_remote=remote)
+        return {
+            "ok": True,
+            "level": lvl,
+            "label": clearance.get_label(lvl),
+            "expires_in": clearance.get_remaining_seconds(session_key, is_remote=remote),
+            "timeout": clearance.get_timeout_seconds(lvl),
+        }
 
     # ---- database viewer: "database access open" -> PIN -> records; "database close" ----
 

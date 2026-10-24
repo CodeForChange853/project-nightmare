@@ -14,7 +14,7 @@ export const PHONE_TABS = [
 ]
 
 function TalkTab({ mode, title, caption, canTalk, onPressStart, onPressEnd, answer, asked, busy, elapsed, speaking, onSpeak,
-  onStop, asks, disabled, onRun, onMore }) {
+  onStop, asks, disabled, onRun, onMore, clearanceLevel = 1, onOpenClearance }) {
   return (
     <div className="flex flex-col items-center gap-4 px-4 pb-4 pt-1">
       <EyeButton
@@ -22,9 +22,28 @@ function TalkTab({ mode, title, caption, canTalk, onPressStart, onPressEnd, answ
         canTalk={canTalk}
         onPressStart={onPressStart}
         onPressEnd={onPressEnd}
+        clearanceLevel={clearanceLevel}
         style={{ width: 'min(58vw, 230px)', aspectRatio: '1' }}
       />
-      <div className="-mt-1 text-center" aria-live="polite">
+      <div className="-mt-1 flex flex-col items-center gap-1.5 text-center" aria-live="polite">
+        <button
+          type="button"
+          onClick={onOpenClearance}
+          className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wider transition-all ${
+            clearanceLevel === 5
+              ? 'border border-[#ffd166]/80 bg-[#ffd166]/20 text-[#ffd166] shadow-[0_0_12px_rgba(255,209,102,0.35)]'
+              : clearanceLevel === 3
+                ? 'border border-amber-400/70 bg-amber-500/20 text-amber-300 shadow-[0_0_8px_rgba(232,163,61,0.25)]'
+                : 'border border-scar/50 bg-scar/15 text-smoke hover:text-bone'
+          }`}
+          title="Security Clearance. Tap to switch."
+        >
+          {clearanceLevel === 5
+            ? 'LEVEL 5 (ARCHITECT)'
+            : clearanceLevel === 3
+              ? 'LEVEL 3 (OPERATOR)'
+              : 'LEVEL 1 (OBSERVER)'}
+        </button>
         <p className="font-display text-[22px] font-bold uppercase leading-none tracking-[0.16em] text-bone">{title}</p>
         <p className="mt-1.5 text-[13px] text-ash">
           {caption}
@@ -41,7 +60,7 @@ function TalkTab({ mode, title, caption, canTalk, onPressStart, onPressEnd, answ
         onSpeak={onSpeak}
         onStop={onStop}
         onMore={answer ? onMore : null}
-        empty="Hold the eye and ask anything, like “progress of bims”, or tap a quick ask below."
+        empty="Hold the eye and ask anything, like â€œprogress of bimsâ€, or tap a quick ask below."
       />
       <div className="grid w-full grid-cols-2 gap-2">
         {asks.map((a) => (
@@ -60,7 +79,7 @@ function TalkTab({ mode, title, caption, canTalk, onPressStart, onPressEnd, answ
   )
 }
 
-function ProjectsTab({ items, readonly, disabled, onRun, openId, onOpen, onBack }) {
+function ProjectsTab({ items, readonly, disabled, onRun, openId, onOpen, onBack, clearanceLevel = 1 }) {
   const [query, setQuery] = useState('')
   const open = items.find((i) => i.id === openId)
   const shown = useMemo(() => {
@@ -78,7 +97,7 @@ function ProjectsTab({ items, readonly, disabled, onRun, openId, onOpen, onBack 
         >
           <Icon name="back" size={18} /> Projects
         </button>
-        <Selected item={open} readonly={readonly} disabled={disabled} onRun={onRun} />
+        <Selected item={open} readonly={readonly} disabled={disabled} onRun={onRun} clearanceLevel={clearanceLevel} />
       </div>
     )
   }
@@ -96,7 +115,7 @@ function ProjectsTab({ items, readonly, disabled, onRun, openId, onOpen, onBack 
           className="min-w-0 flex-1 bg-transparent py-2 text-[15px] text-bone outline-none placeholder:text-smoke"
         />
       </label>
-      {shown.length === 0 && <p className="px-1 text-[14px] text-smoke">No project matches “{query}”.</p>}
+      {shown.length === 0 && <p className="px-1 text-[14px] text-smoke">No project matches â€œ{query}â€.</p>}
       <ul className="flex flex-col gap-2">
         {shown.map((item) => (
           <li key={item.id}>
@@ -123,7 +142,7 @@ function RemindersTab({ items, disabled, onRun }) {
     <div className="flex flex-col gap-2 px-4 pb-4 pt-1">
       {items.length === 0 ? (
         <p className="rounded-xl border border-dashed border-scar/50 p-4 text-[14px] leading-relaxed text-ash">
-          No open reminders. Hold the eye and say “remind me to …” to add one.
+          No open reminders. Hold the eye and say â€œremind me to â€¦â€ to add one.
         </p>
       ) : (
         items.map((item) => (
@@ -131,7 +150,7 @@ function RemindersTab({ items, disabled, onRun }) {
             <div className="min-w-0 flex-1">
               <p className="break-words text-[15px] leading-snug text-bone">{item.title}</p>
               <p className="mt-1 text-[12px] text-smoke">
-                {item.tag} · {item.facts?.[0]?.value}
+                {item.tag} Â· {item.facts?.[0]?.value}
               </p>
             </div>
             <button
@@ -153,7 +172,23 @@ function RemindersTab({ items, disabled, onRun }) {
  * Phone layout: one screen per tab with a thumb-reach tab bar, instead of one long scrolling page.
  * Opening a project pushes a history entry, so Android's back gesture closes it instead of leaving.
  */
-export default function PhoneView({ tab, onTab, categories, entries, unread, readonly, disabled, onRun, talk, composer, busy, elapsed, onSpeak }) {
+export default function PhoneView({
+  tab,
+  onTab,
+  categories,
+  entries,
+  unread,
+  readonly,
+  disabled,
+  onRun,
+  talk,
+  composer,
+  busy,
+  elapsed,
+  onSpeak,
+  clearanceLevel = 1,
+  onOpenClearance,
+}) {
   const byKey = Object.fromEntries(categories.map((c) => [c.key, c]))
   const [openId, setOpenId] = useState(null)
   const scroller = useRef(null)
@@ -180,7 +215,15 @@ export default function PhoneView({ tab, onTab, categories, entries, unread, rea
     <div className="flex min-h-0 flex-1 flex-col">
       <main ref={scroller} className="scroll-thin min-h-0 flex-1 overflow-y-auto" aria-label={PHONE_TABS.find((t) => t.key === tab)?.label}>
         {tab === 'talk' && (
-          <TalkTab {...talk} asks={byKey.asks?.items ?? []} disabled={disabled} onRun={onRun} onMore={() => onTab('chat')} />
+          <TalkTab
+            {...talk}
+            asks={byKey.asks?.items ?? []}
+            disabled={disabled}
+            onRun={onRun}
+            onMore={() => onTab('chat')}
+            clearanceLevel={clearanceLevel}
+            onOpenClearance={onOpenClearance}
+          />
         )}
         {tab === 'projects' && (
           <ProjectsTab
@@ -191,6 +234,7 @@ export default function PhoneView({ tab, onTab, categories, entries, unread, rea
             openId={openId}
             onOpen={openProject}
             onBack={closeProject}
+            clearanceLevel={clearanceLevel}
           />
         )}
         {tab === 'reminders' && <RemindersTab items={byKey.reminders?.items ?? []} disabled={disabled} onRun={onRun} />}

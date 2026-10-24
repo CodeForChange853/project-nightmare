@@ -112,3 +112,26 @@ export const saveAppsConfig = (token, body) =>
 
 export const checkAppsEntry = (token, kind, spec) =>
   call('/settings/apps/check', { method: 'POST', headers: settingsHeaders(token), body: JSON.stringify({ kind, spec }) })
+
+// Security Clearance (Phase 8A: 3-Tier Architecture)
+export const elevateClearance = (level, secret) =>
+  call('/clearance/elevate', { method: 'POST', body: JSON.stringify({ level, secret }) })
+
+export const lockdownClearance = () => call('/clearance/lockdown', { method: 'POST' })
+
+export const getClearanceStatus = () => call('/clearance/status')
+
+// Shared Drive Timeline & Team Quotas (Phase 8D)
+export const getTeamProgress = (team = '') => {
+  const q = team ? `?team=${encodeURIComponent(team)}` : ''
+  return call(`/team-tracker/progress${q}`)
+}
+
+export const sendTeamNudge = (taskId) =>
+  call('/team-tracker/nudge', { method: 'POST', body: JSON.stringify({ task_id: taskId }) })
+
+export const getTimelineDiff = () => call('/team-tracker/diff')
+
+export const syncTimelineBaseline = () => call('/team-tracker/sync', { method: 'POST' })
+
+export const openTimelineInExcel = () => call('/team-tracker/open-excel', { method: 'POST' })

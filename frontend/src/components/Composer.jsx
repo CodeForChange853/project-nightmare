@@ -26,10 +26,15 @@ export default function Composer({
   onStopSpeaking,
   speechError,
   compact = false,
+  clearanceLevel = 1,
+  onOpenClearance,
 }) {
   const [draft, setDraft] = useState('')
   const [pick, setPick] = useState(0)
   const [dismissed, setDismissed] = useState(false)
+
+  const isL5 = clearanceLevel === 5
+  const isL3 = clearanceLevel === 3
 
   // slash suggestions while the first word starts with "/"
   const typed = draft.trimStart()
@@ -95,8 +100,30 @@ export default function Composer({
             e.preventDefault()
             send(draft)
           }}
-          className="flex items-center gap-2 rounded-2xl border border-scar/60 bg-abyss/70 py-1.5 pl-4 pr-1.5 focus-within:border-ember/70 focus-within:shadow-[0_0_0_4px_rgba(220,20,60,0.12)]"
+          className={`flex items-center gap-2 rounded-2xl border bg-abyss/75 py-1.5 pl-3 pr-1.5 transition-all ${
+            isL5
+              ? 'border-[#ffd166]/55 focus-within:border-[#ffd166] focus-within:shadow-[0_0_0_4px_rgba(255,209,102,0.18)]'
+              : isL3
+                ? 'border-amber-500/50 focus-within:border-amber-400 focus-within:shadow-[0_0_0_4px_rgba(232,163,61,0.15)]'
+                : 'border-scar/60 focus-within:border-ember/70 focus-within:shadow-[0_0_0_4px_rgba(220,20,60,0.12)]'
+          }`}
         >
+          {/* Clearance Tag on input */}
+          <button
+            type="button"
+            onClick={onOpenClearance}
+            title={`Clearance: Level ${clearanceLevel}. Click to change.`}
+            className={`hidden shrink-0 items-center gap-1 rounded-lg px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider sm:flex ${
+              isL5
+                ? 'bg-[#ffd166]/20 text-[#ffd166] border border-[#ffd166]/40'
+                : isL3
+                  ? 'bg-amber-500/15 text-amber-300 border border-amber-500/40'
+                  : 'bg-scar/20 text-smoke border border-scar/40 hover:text-bone'
+            }`}
+          >
+            {isL5 ? 'L5 // SHELL' : isL3 ? 'L3 // OPERATOR' : 'L1 // READ'}
+          </button>
+
           <input
             value={draft}
             onChange={(e) => {
@@ -106,7 +133,17 @@ export default function Composer({
             }}
             onKeyDown={onKeyDown}
             disabled={disabled}
-            placeholder={compact ? 'Ask Nightmare…' : 'Ask Nightmare something, or type / for commands'}
+            placeholder={
+              compact
+                ? isL5
+                  ? 'L5 Shell / Ask Nightmare…'
+                  : 'Ask Nightmare…'
+                : isL5
+                  ? 'Architect Console: raw shell command or chat, / for commands'
+                  : isL3
+                    ? 'Ask Nightmare, open allowlisted apps, or type / for commands'
+                    : 'Ask Nightmare something, or type / for commands'
+            }
             aria-label="Command"
             aria-controls={suggestions.length ? 'slash-list' : undefined}
             aria-expanded={suggestions.length > 0}
@@ -118,7 +155,13 @@ export default function Composer({
             type="submit"
             disabled={disabled || !draft.trim()}
             aria-label="Send"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-b from-crimson to-[#9e0d2b] text-white shadow-[0_6px_18px_-6px_rgba(220,20,60,0.9)] hover:brightness-110 disabled:opacity-35"
+            className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-all disabled:opacity-35 ${
+              isL5
+                ? 'bg-gradient-to-b from-[#ffd166] via-amber-400 to-crimson text-black font-bold shadow-[0_6px_20px_-4px_rgba(255,209,102,0.6)] hover:brightness-110'
+                : isL3
+                  ? 'bg-gradient-to-b from-amber-400 to-[#b5142a] text-black font-semibold shadow-[0_6px_18px_-4px_rgba(232,163,61,0.6)] hover:brightness-110'
+                  : 'bg-gradient-to-b from-crimson to-[#9e0d2b] text-white shadow-[0_6px_18px_-6px_rgba(220,20,60,0.9)] hover:brightness-110'
+            }`}
           >
             <Icon name="send" size={16} />
           </button>

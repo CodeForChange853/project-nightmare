@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AuthError, confirmAction, getStatus, loginPin, logoutSession, resetSession, sendChat } from './api'
+import { AuthError, confirmAction, getStatus, lockdownClearance, loginPin, logoutSession, resetSession, sendChat } from './api'
 import Background from './components/Background'
 import Boot from './components/Boot'
+import ClearanceModal from './components/ClearanceModal'
+import ClearanceTransition from './components/ClearanceTransition'
 import Composer from './components/Composer'
 import ConfirmDialog from './components/ConfirmDialog'
 import DatabasePanel from './components/DatabasePanel'
@@ -14,6 +16,7 @@ import NodeGraph from './components/NodeGraph'
 import PhoneView from './components/PhoneView'
 import SettingsPanel from './components/SettingsPanel'
 import StatusBar from './components/StatusBar'
+import TeamProgressPanel from './components/TeamProgressPanel'
 import Terminal from './components/Terminal'
 import { useRecognizer, useSpeaker } from './utils/useSpeech'
 
@@ -46,7 +49,7 @@ function useMedia(query) {
 }
 
 const VOICE_CMD_RE =
-  /^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:switch\s+to|use|change\s+to|set)?\s*(?<gender>male|female)\s+voice\s*[.?!]*$/i
+  /^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:(?:switch|change|set|use)\s+(?:the\s+)?(?:voice\s+to|to\s+)?(?<g1>male|female)(?:\s+voice)?|(?<g2>male|female)\s+voice)\s*[.?!]*$/i
 const SPEED_FASTER_RE =
   /^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:speak|read|talk)\s+(?:faster|quicker|speed\s+up)\s*[.?!]*$/i
 const SPEED_SLOWER_RE =
@@ -56,7 +59,7 @@ const SPEED_NORMAL_RE =
 
 const QUICK_ASKS = [
   { title: 'Which project needs attention?', command: 'which project needs attention?' },
-  { title: 'What’s the weather?', command: 'what is the weather' },
+  { title: 'Whatâ€™s the weather?', command: 'what is the weather' },
   { title: 'List my projects', command: 'list my projects' },
   { title: 'What are my reminders?', command: 'what are my reminders' },
   { title: 'How many calls today?', command: 'how many calls today' },
@@ -76,6 +79,8 @@ const HOME_RE =
   /^\s*(?:(?:hey|ok)\s+)?(?:nightmare[, ]+)?(?:(?:go\s+)?home|(?:go\s+)?full\s*screen|full\s+view|show\s+(?:me\s+)?everything|open\s+(?:the\s+)?full\s+(?:view|nightmare|screen))(?:[, ]+nightmare)?\s*[.?!]*$/i
 const MINI_RE =
   /^\s*(?:(?:hey|ok)\s+)?(?:nightmare[, ]+)?(?:(?:go\s+|oo\s+|ou\s+|u\s+|you\s+|to\s+)?mini|(?:go\s+)?small|small\s+window|mini\s+(?:mode|window|view)|minimi[sz]e(?:\s+nightmare)?)(?:[, ]+nightmare)?\s*[.?!]*$/i
+const HELPER_CMD_RE =
+  /^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:open|show|display|launch|view)\s+(?:the\s+)?(?:developer\s+)?helper(?:\s+function|\s+ui|\s+panel|\s+window)?\s*[.?!]*$|^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?developer\s+helper(?:\s+function|\s+ui|\s+panel|\s+window)?\s*[.?!]*$/i
 
 /**
  * Open a website the backend chose (fixed https templates only) as a tab in this browser.
@@ -152,7 +157,7 @@ function buildCategories(status) {
                 : 'This folder has no handoff.md or README yet, so there is nothing to summarize.'),
           actions: [
             ...(c.has_handoff ? [{ label: 'Read progress', command: `progress of ${c.name}` }] : []),
-            ...(c.has_readme || c.has_handoff ? [{ label: 'What it’s about', command: `what is ${c.name} about` }] : []),
+            ...(c.has_readme || c.has_handoff ? [{ label: 'What itâ€™s about', command: `what is ${c.name} about` }] : []),
             ...(c.git ? [{ label: 'Git status', command: `git status of ${c.name}` }] : []),
             { label: 'Open folder', command: `open the ${c.name} folder`, full: true },
             ...(hasVscode ? [{ label: 'Open in VS Code', command: `open ${c.name} in vs code`, full: true }] : []),
@@ -164,7 +169,7 @@ function buildCategories(status) {
       key: 'reminders',
       label: 'Reminders',
       icon: 'bell',
-      empty: 'No open reminders. Say “remind me to …” to add one.',
+      empty: 'No open reminders. Say â€œremind me to â€¦â€ to add one.',
       items: notes.map((n) => ({
         id: `note:${n.id}`,
         kind: 'note',
@@ -209,7 +214,7 @@ function buildCategories(status) {
         tag: 'task',
         tone: 'hot',
         meter: null,
-        body: 'Runs the command defined for this task in backend/apps.json. You’ll see the exact command before anything runs if the task needs confirmation.',
+        body: 'Runs the command defined for this task in backend/apps.json. Youâ€™ll see the exact command before anything runs if the task needs confirmation.',
         actions: [{ label: 'Run task', command: `run ${t}`, full: true }],
       })),
     },
@@ -226,7 +231,7 @@ function buildCategories(status) {
         title: q.title,
         tag: 'ask',
         meter: null,
-        body: `Sends “${q.command}” to Nightmare.`,
+        body: `Sends â€œ${q.command}â€ to Nightmare.`,
         actions: [{ label: 'Ask', command: q.command }],
       })),
     },
@@ -255,6 +260,29 @@ export default function App() {
   const closeSettingsPanel = useCallback(() => setSettingsOpen(false), [])
   const [helpOpen, setHelpOpen] = useState(false)
   const closeHelp = useCallback(() => setHelpOpen(false), [])
+  const [teamProgressOpen, setTeamProgressOpen] = useState(false)
+  const [teamProgressData, setTeamProgressData] = useState(null)
+  const [teamProgressTab, setTeamProgressTab] = useState('summary')
+  const closeTeamProgress = useCallback(() => setTeamProgressOpen(false), [])
+  const [clearancePrompt, setClearancePrompt] = useState(null)
+  const closeClearance = useCallback(() => setClearancePrompt(null), [])
+  const clearanceLevel = status?.clearance_level ?? 1
+  const [transitionState, setTransitionState] = useState(null)
+  const prevClearanceRef = useRef(null)
+
+  useEffect(() => {
+    if (status && prevClearanceRef.current !== null && prevClearanceRef.current !== clearanceLevel) {
+      setTransitionState({ level: clearanceLevel, prevLevel: prevClearanceRef.current })
+    }
+    if (status) {
+      prevClearanceRef.current = clearanceLevel
+    }
+  }, [status, clearanceLevel])
+
+  const openClearance = useCallback(() => {
+    setClearancePrompt({ level: clearanceLevel >= 3 ? 5 : 3 })
+  }, [clearanceLevel])
+
   const [asleep, setAsleep] = useState(false)
   // layouts: the helper's mini window, the phone (tab bar) and the desktop graph
   const narrowWindow = useMedia('(max-width: 599px)')
@@ -357,7 +385,7 @@ export default function App() {
         setLocked(false)
         refreshStatus()
       } catch (err) {
-        setPinError(err.message || 'That PIN didn’t work.')
+        setPinError(err.message || 'That PIN didnâ€™t work.')
       } finally {
         setBusy(false)
       }
@@ -399,15 +427,40 @@ export default function App() {
     asideRef.current?.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' })
   }, [])
 
+  const handleLockdown = useCallback(async () => {
+    try {
+      await lockdownClearance()
+      refreshStatus()
+      say('Clearance locked down to Level 1.')
+    } catch (err) {
+      add('system', err.message || 'Lockdown failed.')
+    }
+  }, [refreshStatus, say, add])
+
   const submit = useCallback(
     async (text) => {
       let clean = text.trim()
-      if (!clean || busyRef.current || pendingRef.current || lockedRef.current) return
+      if (pendingRef.current) {
+        if (/^(?:approve|confirm|yes|send)(?:\s+(?:the\s+)?(?:team\s+)?(?:reminder\s+)?email)?$/i.test(clean)) {
+          approve()
+          return
+        }
+        if (/^(?:decline|cancel|no|deny)(?:\s+(?:the\s+)?(?:team\s+)?(?:reminder\s+)?email)?$/i.test(clean)) {
+          deny()
+          return
+        }
+        return
+      }
+      if (!clean || busyRef.current || lockedRef.current) return
 
       // typed slash commands are handled here and never reach the backend as chat
       if (clean.startsWith('/')) {
         const cmd = clean.split(/\s+/)[0].toLowerCase()
         if (cmd === '/help') return setHelpOpen(true)
+        if (cmd === '/timeline' || cmd === '/team') {
+          clean = 'show team progress'
+        } else if (cmd === '/clearance') return openClearance()
+        if (cmd === '/lockdown') return handleLockdown()
         if (cmd === '/clear' || cmd === '/new') {
           clearConversation()
           switchTab('log')
@@ -432,12 +485,21 @@ export default function App() {
       // on the phone, an action from a project page is answered on the Talk tab
       if (layoutRef.current.phone && layoutRef.current.phoneTab === 'projects') setPhoneTab('talk')
 
+      // "open helper function" / "developer helper": open the helper UI with voice announcement
+      if (HELPER_CMD_RE.test(clean)) {
+        const msg = 'Opening developer helper function.'
+        add('nightmare', msg, { ok: true, understood: 'quick_reply â†’ helper' })
+        say(msg)
+        setHelpOpen(true)
+        return
+      }
+
       // "home" / "mini": switch between the small window and the full view, no model call
       if (HOME_RE.test(clean) || MINI_RE.test(clean)) {
         const home = HOME_RE.test(clean)
         let msg
         if (home) {
-          msg = layoutRef.current.mini ? 'Opening the full view.' : 'You’re already on the full view.'
+          msg = layoutRef.current.mini ? 'Opening the full view.' : 'Youâ€™re already on the full view.'
           if (layoutRef.current.mini) setWantFull(true)
         } else if (MINI_HOST) {
           msg = layoutRef.current.mini ? 'This is the small window.' : 'Back to the small window.'
@@ -445,7 +507,7 @@ export default function App() {
         } else {
           msg = 'Press Ctrl+Alt+N on the laptop to open the small window.'
         }
-        add('nightmare', msg, { ok: true, understood: home ? 'view → full' : 'view → mini' })
+        add('nightmare', msg, { ok: true, understood: home ? 'view â†’ full' : 'view â†’ mini' })
         say(msg)
         return
       }
@@ -459,7 +521,7 @@ export default function App() {
         return
       }
       if (SLEEP_RE.test(clean)) {
-        const msg = `Going to sleep. ${HOLD} and say “Nightmare, wake up” when you need me.`
+        const msg = `Going to sleep. ${HOLD} and say â€œNightmare, wake upâ€ when you need me.`
         add('nightmare', msg, { ok: true, understood: 'sleep' })
         say(msg)
         setAsleep(true)
@@ -470,10 +532,10 @@ export default function App() {
       // Local voice gender & speed commands
       const mVoice = VOICE_CMD_RE.exec(clean)
       if (mVoice) {
-        const g = mVoice.groups.gender.toLowerCase()
+        const g = (mVoice.groups.g1 || mVoice.groups.g2 || mVoice.groups.gender).toLowerCase()
         setVoiceGender(g)
         const msg = `Switched to ${g} voice.`
-        add('nightmare', msg, { ok: true, understood: `voice_settings → ${g}` })
+        add('nightmare', msg, { ok: true, understood: `voice_settings â†’ ${g}` })
         say(msg, { gender: g })
         return
       }
@@ -481,7 +543,7 @@ export default function App() {
         const next = Math.min(1.5, Number((rateRef.current + 0.15).toFixed(2)))
         setRate(next)
         const msg = `Reading speed set to ${next}x.`
-        add('nightmare', msg, { ok: true, understood: `voice_settings → ${next}x` })
+        add('nightmare', msg, { ok: true, understood: `voice_settings â†’ ${next}x` })
         say(msg, { rate: next })
         return
       }
@@ -489,14 +551,14 @@ export default function App() {
         const next = Math.max(0.85, Number((rateRef.current - 0.15).toFixed(2)))
         setRate(next)
         const msg = `Reading speed set to ${next}x.`
-        add('nightmare', msg, { ok: true, understood: `voice_settings → ${next}x` })
+        add('nightmare', msg, { ok: true, understood: `voice_settings â†’ ${next}x` })
         say(msg, { rate: next })
         return
       }
       if (SPEED_NORMAL_RE.test(clean)) {
         setRate(1.0)
         const msg = 'Reading speed reset to 1x.'
-        add('nightmare', msg, { ok: true, understood: 'voice_settings → 1x' })
+        add('nightmare', msg, { ok: true, understood: 'voice_settings â†’ 1x' })
         say(msg, { rate: 1.0 })
         return
       }
@@ -523,8 +585,22 @@ export default function App() {
         if (res.ui === 'db_pin') setDbOpen(true)
         if (res.ui === 'db_close') setDbOpen(false)
         if (res.ui === 'settings_pin') setSettingsOpen(true)
+        if (res.ui?.startsWith('voice:')) setVoiceGender(res.ui.split(':')[1])
         if (res.ui === 'settings_close') setSettingsOpen(false)
         if (res.ui === 'help') setHelpOpen(true)
+        if (res.ui === 'team_progress') {
+          setTeamProgressData(res.data)
+          setTeamProgressTab('summary')
+          setTeamProgressOpen(true)
+        }
+        if (res.ui === 'team_progress:diff') {
+          setTeamProgressData(res.data)
+          setTeamProgressTab('diff')
+          setTeamProgressOpen(true)
+        }
+        if (res.ui === 'clearance_prompt:3') setClearancePrompt({ level: 3 })
+        if (res.ui === 'clearance_prompt:5') setClearancePrompt({ level: 5 })
+        if (res.ui === 'clearance_reset:1') refreshStatus()
         // Always read the full generated reply aloud
         say(res.reply)
       } catch (err) {
@@ -536,7 +612,20 @@ export default function App() {
         refreshStatus().then(() => applyFocus(focusAfter))
       }
     },
-    [add, cancel, say, refreshStatus, switchTab, setVoiceGender, setRate, clearConversation, applyFocus, revealPanel],
+    [
+      add,
+      cancel,
+      say,
+      refreshStatus,
+      switchTab,
+      setVoiceGender,
+      setRate,
+      clearConversation,
+      applyFocus,
+      revealPanel,
+      openClearance,
+      handleLockdown,
+    ],
   )
 
   // ---- idle sleep ----
@@ -662,12 +751,12 @@ export default function App() {
               : 'idle'
 
   const [title, caption, caption2] = {
-    sleep: ['Sleeping', `${HOLD} and say “Nightmare, wake up”`, 'Idle'],
+    sleep: ['Sleeping', `${HOLD} and say â€œNightmare, wake upâ€`, 'Idle'],
     offline: ['Asleep', 'Backend offline', 'Start it with python -m backend'],
     confirm: ['Awaiting you', 'Approve or deny with a click', null],
-    thinking: ['Thinking', `${elapsed}s so far`, 'Fast model ~8s · Smart model ~14s'],
+    thinking: ['Thinking', `${elapsed}s so far`, 'Fast model ~8s Â· Smart model ~14s'],
     listening: ['Listening', interim || 'Speak now, release to send', null],
-    speaking: ['Speaking', `${voiceGender} voice · ${rate}x`, TOUCH ? 'Tap Stop to interrupt' : 'Hold Space or click Stop to interrupt'],
+    speaking: ['Speaking', `${voiceGender} voice Â· ${rate}x`, TOUCH ? 'Tap Stop to interrupt' : 'Hold Space or click Stop to interrupt'],
     idle: supported
       ? ['Watching', TOUCH ? 'Hold the eye to talk' : 'Hold the eye or Space to talk', null]
       : ['Watching', 'Type a command in the panel', 'Voice input needs Chrome or Edge'],
@@ -695,6 +784,8 @@ export default function App() {
     speaking,
     onStopSpeaking: cancel,
     speechError,
+    clearanceLevel,
+    onOpenClearance: openClearance,
   }
   const talkProps = {
     mode,
@@ -710,13 +801,16 @@ export default function App() {
     speaking,
     onSpeak: say,
     onStop: cancel,
+    clearanceLevel,
+    onOpenClearance: openClearance,
   }
 
   return (
     <div
-      className={`relative flex h-dvh flex-col ${mini || phone ? 'overflow-hidden' : 'overflow-y-auto lg:overflow-hidden'}`}
+      data-clearance={clearanceLevel}
+      className={`relative flex h-dvh flex-col transition-colors duration-700 ${mini || phone ? 'overflow-hidden' : 'overflow-y-auto lg:overflow-hidden'}`}
     >
-      <Background />
+      <Background clearanceLevel={clearanceLevel} />
       {!mini && (
         <StatusBar
           status={status}
@@ -725,6 +819,8 @@ export default function App() {
           onLogout={handleLogout}
           onRetry={refreshStatus}
           onSettings={() => setSettingsOpen(true)}
+          onOpenClearance={openClearance}
+          onLockdown={handleLockdown}
         />
       )}
 
@@ -737,6 +833,7 @@ export default function App() {
           offline={offline}
           onHome={() => submit('home')}
           composer={composerProps}
+          onOpenClearance={openClearance}
         />
       ) : phone ? (
         <PhoneView
@@ -753,6 +850,8 @@ export default function App() {
           busy={busy}
           elapsed={elapsed}
           onSpeak={say}
+          clearanceLevel={clearanceLevel}
+          onOpenClearance={openClearance}
         />
       ) : (
         <main className="grid flex-1 grid-cols-[minmax(0,1fr)] gap-4 px-4 pb-4 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_minmax(380px,420px)] lg:px-6 lg:pb-6">
@@ -775,6 +874,7 @@ export default function App() {
               onPressEnd={release}
               focus={focus}
               asleep={asleep}
+              clearanceLevel={status?.clearance_level ?? 1}
             />
           </section>
 
@@ -846,7 +946,41 @@ export default function App() {
           }}
         />
       )}
+      {teamProgressOpen && !locked && (
+        <TeamProgressPanel
+          data={teamProgressData}
+          initialTab={teamProgressTab}
+          pendingAction={pending}
+          onApprove={approve}
+          onDecline={deny}
+          onClose={closeTeamProgress}
+          onRefresh={() => submit('show team progress')}
+        />
+      )}
+      {clearancePrompt && !locked && (
+        <ClearanceModal
+          level={clearancePrompt.level}
+          currentLevel={clearanceLevel}
+          onClose={closeClearance}
+          onSuccess={(lvl) => {
+            closeClearance()
+            refreshStatus()
+            if (lvl === 1) {
+              say('Clearance locked down to Level 1.')
+            } else {
+              say(`Clearance elevated to Level ${lvl}.`)
+            }
+          }}
+        />
+      )}
       {!bootDone && <Boot done={bootLoaded} onFinished={finishBoot} />}
+      {transitionState && (
+        <ClearanceTransition
+          level={transitionState.level}
+          prevLevel={transitionState.prevLevel}
+          onComplete={() => setTransitionState(null)}
+        />
+      )}
     </div>
   )
 }

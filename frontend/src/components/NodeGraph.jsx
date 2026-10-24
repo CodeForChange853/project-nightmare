@@ -37,12 +37,23 @@ function Meter({ level }) {
   )
 }
 
-function ItemLabel({ item, selected }) {
+function ItemLabel({ item, selected, clearanceLevel = 1 }) {
+  const needsL3 = clearanceLevel < 3 && item.actions?.some((a) => a.full)
   return (
     <>
-      <span className={`block truncate text-[13px] font-medium ${selected ? 'text-white' : 'text-bone/90'}`}>
-        {item.title}
-      </span>
+      <div className="flex items-center justify-between gap-1.5">
+        <span className={`block truncate text-[13px] font-medium ${selected ? 'text-white' : 'text-bone/90'}`}>
+          {item.title}
+        </span>
+        {needsL3 && (
+          <span
+            className="shrink-0 rounded-[3px] border border-amber-500/50 bg-amber-500/10 px-1 py-px font-mono text-[9px] font-semibold text-amber-300"
+            title="Requires Level 3 (Operator) to execute"
+          >
+            L3
+          </span>
+        )}
+      </div>
       <span className="mt-1 flex items-center gap-2">
         {item.tag && (
           <span
@@ -112,6 +123,7 @@ export default function NodeGraph({
   canTalk,
   focus, // { key, itemId, n }: light up the node (and item) a reply was about
   asleep,
+  clearanceLevel = 1,
 }) {
   const box = useRef(null)
   const wasAsleep = useRef(false)
@@ -425,15 +437,52 @@ export default function NodeGraph({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey, ready, compact])
 
+  // ---- clearance surge wave: re-energize the web when clearance changes ----
+  const prevClearance = useRef(clearanceLevel)
+  useEffect(() => {
+    if (!ready || !size.w || reducedMotion() || prevClearance.current === clearanceLevel) {
+      prevClearance.current = clearanceLevel
+      return
+    }
+    prevClearance.current = clearanceLevel
+    const root = box.current
+    if (!root) return
+    const trunks = root.querySelectorAll('[data-trunk]')
+    const fans = root.querySelectorAll('[data-fan]')
+    const chipsEl = root.querySelectorAll('[data-chip]')
+    gsap.fromTo(
+      trunks,
+      { strokeWidth: clearanceLevel === 5 ? 3.5 : clearanceLevel === 3 ? 2.5 : 2, opacity: 1 },
+      { strokeWidth: 1, duration: 0.85, ease: 'power2.out', clearProps: 'strokeWidth' }
+    )
+    gsap.fromTo(
+      fans,
+      { drawSVG: '0%' },
+      { drawSVG: '100%', duration: 0.6, ease: 'power2.out', stagger: 0.02, clearProps: 'strokeDasharray,strokeDashoffset' }
+    )
+    gsap.fromTo(
+      chipsEl,
+      { scale: 1.05 },
+      { scale: 1, duration: 0.6, stagger: 0.04, ease: 'back.out(2)', clearProps: 'transform' }
+    )
+  }, [clearanceLevel, ready, size.w])
+
   const orbButton = (sizeStyle) => (
-    <EyeButton mode={mode} canTalk={canTalk} onPressStart={onPressStart} onPressEnd={onPressEnd} style={sizeStyle} />
+    <EyeButton
+      mode={mode}
+      canTalk={canTalk}
+      onPressStart={onPressStart}
+      onPressEnd={onPressEnd}
+      style={sizeStyle}
+      clearanceLevel={clearanceLevel}
+    />
   )
 
   const captionBlock = (
     <div className="pointer-events-none text-center" aria-live="polite">
       <p data-orbtext className="text-[13px] font-medium text-bone">
         {caption}
-        {mode === 'listening' && <span className="caret ml-0.5 text-ember">▌</span>}
+        {mode === 'listening' && <span className="caret ml-0.5 text-ember">â–Œ</span>}
       </p>
       {caption2 && (
         <p data-orbtext className="mx-auto mt-1 max-w-[30ch] truncate text-[11px] text-smoke">
@@ -472,7 +521,7 @@ export default function NodeGraph({
                   item.id === selectedId ? 'bg-scar/50 ring-1 ring-crimson/60' : 'tile'
                 }`}
               >
-                <ItemLabel item={item} selected={item.id === selectedId} />
+                <ItemLabel item={item} selected={item.id === selectedId} clearanceLevel={clearanceLevel} />
               </button>
             </li>
           ))}
@@ -495,6 +544,13 @@ export default function NodeGraph({
   const thumb = Math.min(1, geo.visible / (items.length + 2))
   const progress = scrollable ? (offset - range.min) / (range.max - range.min) : 0
 
+  const isL5 = clearanceLevel === 5
+  const isL3 = clearanceLevel === 3
+  const activeTrunkStroke = isL5 ? '#ffd166' : isL3 ? '#e8a33d' : '#ff5466'
+  const inactiveTrunkStroke = isL5 ? '#6e1d27' : isL3 ? '#58211b' : '#5c1a24'
+  const sparkFill = isL5 ? '#fff3c4' : isL3 ? '#ffe4a8' : '#ffd3d8'
+  const sparkShadow = isL5 ? 'drop-shadow(0 0 8px #ffd166)' : isL3 ? 'drop-shadow(0 0 6px #e8a33d)' : 'drop-shadow(0 0 6px #ff5466)'
+
   return (
     <div ref={box} className="relative h-full min-h-0 w-full overflow-hidden">
       {/* the "web": lines, nodes and arc. Sleep folds all of it away; the eye stays. */}
@@ -502,8 +558,8 @@ export default function NodeGraph({
         <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden>
           <defs>
             <linearGradient id="fan-stroke" x1="0" x2="1">
-              <stop offset="0" stopColor="#ff5466" stopOpacity="0.9" />
-              <stop offset="1" stopColor="#dc143c" stopOpacity="0.35" />
+              <stop offset="0" stopColor={isL5 ? '#ffd166' : isL3 ? '#ff8a47' : '#ff5466'} stopOpacity="0.9" />
+              <stop offset="1" stopColor={isL5 ? '#ff1e42' : isL3 ? '#e8a33d' : '#dc143c'} stopOpacity="0.35" />
             </linearGradient>
           </defs>
           {chips.map((c) => {
@@ -516,10 +572,19 @@ export default function NodeGraph({
                   data-trunk-key={c.key}
                   d={d}
                   fill="none"
-                  stroke={on ? '#ff5466' : '#5c1a24'}
-                  strokeWidth={on ? 1.5 : 1}
+                  stroke={on ? activeTrunkStroke : inactiveTrunkStroke}
+                  strokeWidth={on ? (isL5 ? 1.8 : 1.5) : 1}
                 />
-                {busy && <path d={d} fill="none" stroke="#ff5466" strokeOpacity="0.8" strokeWidth="1.5" className="flow" />}
+                {(busy || isL5) && (
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke={activeTrunkStroke}
+                    strokeOpacity={busy ? 0.85 : 0.4}
+                    strokeWidth="1.5"
+                    className="flow"
+                  />
+                )}
               </g>
             )
           })}
@@ -530,16 +595,21 @@ export default function NodeGraph({
                 data-fan-id={item.id}
                 d={curve(fanX, fanY, x - 8, y)}
                 fill="none"
-                stroke={item.id === selectedId ? '#ff5466' : 'url(#fan-stroke)'}
+                stroke={item.id === selectedId ? activeTrunkStroke : 'url(#fan-stroke)'}
                 strokeOpacity={item.id === selectedId ? 1 : 0.55}
                 strokeWidth={item.id === selectedId ? 1.6 : 1}
               />
-              <circle cx={x - 6} cy={y} r={item.id === selectedId ? 4 : 2.8} fill="#ff8a95" />
+              <circle
+                cx={x - 6}
+                cy={y}
+                r={item.id === selectedId ? 4 : 2.8}
+                fill={item.id === selectedId ? activeTrunkStroke : isL5 ? '#ff4d6d' : isL3 ? '#ff8a47' : '#ff8a95'}
+              />
             </g>
           ))}
-          <circle cx={fanX} cy={fanY} r="3.5" fill="#ff5466" />
+          <circle cx={fanX} cy={fanY} r="3.5" fill={activeTrunkStroke} />
           {/* travels eye -> node -> item when a reply is about them */}
-          <circle data-spark cx="0" cy="0" r="5" fill="#ffd3d8" opacity="0" style={{ filter: 'drop-shadow(0 0 6px #ff5466)' }} />
+          <circle data-spark cx="0" cy="0" r="5" fill={sparkFill} opacity="0" style={{ filter: sparkShadow }} />
         </svg>
 
         {chips.map((c) => {
@@ -597,16 +667,22 @@ export default function NodeGraph({
                   pointerEvents: opacity < 0.3 ? 'none' : undefined,
                 }}
                 className={`absolute rounded-lg px-2.5 py-1 text-left transition-[background-color,box-shadow] ${
-                  sel ? 'bg-scar/45 shadow-[0_0_28px_-6px_rgba(220,20,60,0.7)] ring-1 ring-crimson/70' : 'hover:bg-vein/50'
+                  sel
+                    ? isL5
+                      ? 'bg-scar/55 shadow-[0_0_30px_-4px_rgba(255,209,102,0.45)] ring-1 ring-[#ffd166]/80'
+                      : isL3
+                        ? 'bg-scar/50 shadow-[0_0_28px_-6px_rgba(232,163,61,0.5)] ring-1 ring-amber-400/80'
+                        : 'bg-scar/45 shadow-[0_0_28px_-6px_rgba(220,20,60,0.7)] ring-1 ring-crimson/70'
+                    : 'hover:bg-vein/50'
                 }`}
               >
-                <ItemLabel item={item} selected={sel} />
+                <ItemLabel item={item} selected={sel} clearanceLevel={clearanceLevel} />
               </button>
             )
           })}
           {scrollable && (
             <p className="pointer-events-none absolute bottom-1 text-[11px] text-smoke" style={{ left: geo.xBase - fanX }}>
-              {first}–{last} of {items.length}. Scroll, drag or use the arrow keys.
+              {first}â€“{last} of {items.length}. Scroll, drag or use the arrow keys.
             </p>
           )}
         </div>

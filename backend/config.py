@@ -48,6 +48,8 @@ class Settings:
     port: int = 8000
     pin: str = ""
     phone_pin: str = ""
+    l3_pin: str = ""
+    l5_password: str = ""
     session_ttl: int = 86400 * 7  # 7 days
     agy_command: str = "agy"
     agy_timeout: int = 90
@@ -66,6 +68,17 @@ class Settings:
     summary_refresh_sec: int = 0  # background summary refresh interval; 0 = off (env default 180)
     log_retention_days: int = 90  # activity-log rows older than this are pruned at startup; 0 keeps all
     remote_hosts: tuple = ()  # tailscale serve names; requests under them are remote and read-only
+    team_excel_path: Path | None = None
+    team_gdrive_folder_url: str = "https://drive.google.com/drive/folders/1P4CWnBnYfLkkGKnrAswe9lwX5HcCQYDg?usp=sharing"
+    team_gdrive_sync_path: Path | None = None
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_app_password: str = ""
+
+    @property
+    def repo_root(self) -> Path:
+        return BACKEND_DIR.parent
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -91,13 +104,19 @@ class Settings:
         if fmt not in {"auto", "json", "text"}:
             raise RuntimeError("AGY_FORMAT must be auto, json or text")
 
+        pin = env.get("NIGHTMARE_PIN", "").strip()
+        l3_pin = env.get("NIGHTMARE_L3_PIN", "").strip() or pin
+        l5_password = env.get("NIGHTMARE_L5_PASSWORD", "").strip() or token
+
         return cls(
             desktop_root=Path(env.get("DESKTOP_ROOT") or default_desktop()).expanduser(),
             api_token=token,
             allowed_origins=origins,
             port=port,
-            pin=env.get("NIGHTMARE_PIN", "").strip(),
+            pin=pin,
             phone_pin=env.get("NIGHTMARE_PHONE_PIN", "").strip(),
+            l3_pin=l3_pin,
+            l5_password=l5_password,
             session_ttl=int(env.get("SESSION_TTL", str(86400 * 7))),
             agy_command=env.get("AGY_COMMAND", "agy").strip() or "agy",
             agy_timeout=int(env.get("AGY_TIMEOUT", "90")),
@@ -116,4 +135,11 @@ class Settings:
             summary_refresh_sec=int(env.get("SUMMARY_REFRESH_SEC", "180")),
             log_retention_days=int(env.get("LOG_RETENTION_DAYS", "90")),
             remote_hosts=_hostnames(env.get("NIGHTMARE_ALLOWED_HOSTS")),
+            team_excel_path=Path(env["NIGHTMARE_TEAM_EXCEL_PATH"].strip().strip('"\'')).expanduser() if env.get("NIGHTMARE_TEAM_EXCEL_PATH", "").strip().strip('"\'') else None,
+            team_gdrive_folder_url=env.get("NIGHTMARE_TEAM_GDRIVE_FOLDER_URL", "").strip().strip('"\'') or "https://drive.google.com/drive/folders/1P4CWnBnYfLkkGKnrAswe9lwX5HcCQYDg?usp=sharing",
+            team_gdrive_sync_path=Path(env["NIGHTMARE_TEAM_GDRIVE_SYNC_PATH"].strip().strip('"\'')).expanduser() if env.get("NIGHTMARE_TEAM_GDRIVE_SYNC_PATH", "").strip().strip('"\'') else None,
+            smtp_host=env.get("SMTP_HOST", "smtp.gmail.com").strip() or "smtp.gmail.com",
+            smtp_port=int(env.get("SMTP_PORT", "587")),
+            smtp_user=env.get("SMTP_USER", "").strip(),
+            smtp_app_password=env.get("SMTP_APP_PASSWORD", "").strip(),
         )

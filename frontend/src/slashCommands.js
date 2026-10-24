@@ -1,6 +1,8 @@
 // Typed-only shortcuts. They are handled in the browser (App.jsx); voice can't produce "/".
 export const SLASH_COMMANDS = [
   { name: '/help', hint: 'Show every command Nightmare understands' },
+  { name: '/clearance', hint: 'View or switch security clearance tier (L1, L3, L5)' },
+  { name: '/lockdown', hint: 'Emergency drop to Level 1 Observer (locks all mutations)' },
   { name: '/clear', hint: 'Clear the conversation and start a new session' },
   { name: '/new', hint: 'Start a new session (same as /clear)' },
   { name: '/reminders', hint: 'Read your reminders' },

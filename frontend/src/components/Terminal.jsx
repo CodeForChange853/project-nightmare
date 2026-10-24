@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react'
+﻿import { useEffect, useLayoutEffect, useRef } from 'react'
 import gsap from 'gsap'
 import Icon, { Sigil } from './Icon'
 
@@ -123,7 +123,7 @@ export default function Terminal({ entries, busy, elapsed, onSpeak }) {
                   type below.
                 </>
               )}{' '}
-              Try “progress of bims”.
+              Try â€œprogress of bimsâ€.
             </p>
           </div>
         </div>

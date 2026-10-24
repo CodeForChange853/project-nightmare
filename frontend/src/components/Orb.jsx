@@ -5,6 +5,12 @@ import gsap from 'gsap'
  * The core: a blood-moon eye inside a ring of waveform spikes. Each mode changes how hard
  * the ring moves and how wide the pupil opens, so you can read Nightmare's state at a glance:
  * listening = wide awake, thinking = pinned pupil with a scanning arc, confirm = dilated.
+ *
+ * Clearance tiers evolve the eye itself:
+ * - Level 1 (Observer): Coagulated blood moon, single dashed inner ring, calm crimson waveform.
+ * - Level 3 (Operator): Molten arterial moon, counter-rotating telemetry ring, amber-tipped spikes.
+ * - Level 5 (Architect): Total Blood-Moon Eclipse — abyssal void core ringed by a blazing gilded-crimson
+ *   solar corona, dual geometric sigil reticles, and a luminous golden-rimmed slit pupil.
  */
 const MODES = {
   idle: { amp: 0.2, pupil: 0.13, speed: 0.6, glow: 0.6, lid: 0 },
@@ -19,9 +25,19 @@ const MODES = {
 const SPIKES = 220
 const TAU = Math.PI * 2
 
-export default function Orb({ mode = 'idle', className = '', track = true }) {
+export default function Orb({ mode = 'idle', clearanceLevel = 1, className = '', track = true }) {
   const canvasRef = useRef(null)
-  const live = useRef({ ...MODES.idle, mode, lookX: 0, lookY: 0, lid: 0, flare: 0 })
+  const live = useRef({
+    ...MODES.idle,
+    mode,
+    lookX: 0,
+    lookY: 0,
+    lid: 0,
+    flare: 0,
+    tier3: clearanceLevel === 3 ? 1 : 0,
+    tier5: clearanceLevel === 5 ? 1 : 0,
+    tierFlare: 0,
+  })
 
   // ease every visual parameter toward the new mode
   useEffect(() => {
@@ -37,6 +53,30 @@ export default function Orb({ mode = 'idle', className = '', track = true }) {
       flare.kill()
     }
   }, [mode])
+
+  // smoothly morph the eye across clearance tiers (L1 <-> L3 <-> L5)
+  useEffect(() => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const t3 = clearanceLevel === 3 ? 1 : 0
+    const t5 = clearanceLevel === 5 ? 1 : 0
+    const morph = gsap.to(live.current, {
+      tier3: t3,
+      tier5: t5,
+      duration: reduced ? 0 : 1.05,
+      ease: 'expo.out',
+    })
+    const burst = reduced
+      ? null
+      : gsap.fromTo(
+          live.current,
+          { tierFlare: 1.35, flare: 1 },
+          { tierFlare: 0, flare: 0, duration: 1.4, ease: 'power3.out' },
+        )
+    return () => {
+      morph.kill()
+      burst?.kill()
+    }
+  }, [clearanceLevel])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -82,33 +122,83 @@ export default function Orb({ mode = 'idle', className = '', track = true }) {
     if (!reduced) scheduleBlink()
 
     const draw = () => {
-      t += (reduced ? 0.12 : 1) * s.speed * 0.016 * gsap.ticker.deltaRatio()
+      const w3 = s.tier3
+      const w5 = s.tier5
+      const tierSpeedMult = 1 + w3 * 0.25 + w5 * 0.55
+      t += (reduced ? 0.12 : 1) * s.speed * tierSpeedMult * 0.016 * gsap.ticker.deltaRatio()
       const w = canvas.width
       const h = canvas.height
       const cx = w / 2
       const cy = h / 2
       const R = Math.min(w, h) / 2
       const breath = s.mode === 'sleep' ? 0.12 * Math.sin(t * 6) : 0
-      const glow = Math.min(1.4, s.glow + s.flare * 0.5 + breath)
+      const glow = Math.min(1.6, s.glow + s.flare * 0.5 + s.tierFlare * 0.45 + w3 * 0.12 + w5 * 0.25 + breath)
       ctx.clearRect(0, 0, w, h)
 
-      // halo
-      const halo = ctx.createRadialGradient(cx, cy, R * 0.25, cx, cy, R)
-      halo.addColorStop(0, `rgba(220,20,60,${0.26 * glow})`)
-      halo.addColorStop(0.55, `rgba(110,8,26,${0.1 * glow})`)
+      // 1. Halo (warms to molten amber in L3, gilded solar-crimson in L5)
+      const halo = ctx.createRadialGradient(cx, cy, R * 0.2, cx, cy, R)
+      if (w5 > 0.3) {
+        halo.addColorStop(0, `rgba(255, 209, 102, ${0.28 * glow * w5 + 0.2 * glow * (1 - w5)})`)
+        halo.addColorStop(0.42, `rgba(220, 20, 60, ${0.22 * glow})`)
+        halo.addColorStop(0.75, `rgba(110, 8, 26, ${0.12 * glow})`)
+      } else if (w3 > 0.3) {
+        halo.addColorStop(0, `rgba(232, 163, 61, ${0.26 * glow * w3 + 0.22 * glow * (1 - w3)})`)
+        halo.addColorStop(0.55, `rgba(160, 24, 28, ${0.14 * glow})`)
+      } else {
+        halo.addColorStop(0, `rgba(220, 20, 60, ${0.26 * glow})`)
+        halo.addColorStop(0.55, `rgba(110, 8, 26, ${0.1 * glow})`)
+      }
       halo.addColorStop(1, 'rgba(0,0,0,0)')
       ctx.fillStyle = halo
       ctx.fillRect(0, 0, w, h)
 
-      // spike ring
       const rRing = R * 0.62
+
+      // 2. Outer Tactical Telemetry Ring (L3 Operator & L5 Architect)
+      const outerWeight = Math.max(w3, w5)
+      if (outerWeight > 0.02) {
+        const rOuter = rRing * (1.2 + s.tierFlare * 0.04)
+        ctx.save()
+        ctx.translate(cx, cy)
+        ctx.rotate(-t * (0.22 + w5 * 0.18))
+        ctx.strokeStyle =
+          w5 > 0.5
+            ? `rgba(255, 209, 102, ${0.42 * outerWeight})`
+            : `rgba(232, 163, 61, ${0.34 * outerWeight})`
+        ctx.lineWidth = Math.max(1, R * 0.0045)
+        ctx.setLineDash([R * 0.04, R * 0.025, R * 0.01, R * 0.025])
+        ctx.beginPath()
+        ctx.arc(0, 0, rOuter, 0, TAU)
+        ctx.stroke()
+
+        // Cardinal & intercardinal degree ticks
+        const ticks = w5 > 0.5 ? 12 : 8
+        ctx.setLineDash([])
+        ctx.lineWidth = Math.max(1, R * 0.006)
+        for (let k = 0; k < ticks; k++) {
+          const ang = (k / ticks) * TAU
+          const isMajor = k % (ticks / 4) === 0
+          const len = R * (isMajor ? 0.042 : 0.022) * outerWeight
+          ctx.beginPath()
+          ctx.moveTo(Math.cos(ang) * (rOuter - len * 0.5), Math.sin(ang) * (rOuter - len * 0.5))
+          ctx.lineTo(Math.cos(ang) * (rOuter + len * 0.5), Math.sin(ang) * (rOuter + len * 0.5))
+          ctx.stroke()
+        }
+        ctx.restore()
+      }
+
+      // 3. Spike waveform ring
       const scanAt = (t * 2.6) % TAU
       const dim = new Path2D()
       const hot = new Path2D()
+      const tierAmpBoost = 1 + w3 * 0.18 + w5 * 0.36 + s.tierFlare * 0.4
       for (let i = 0; i < SPIKES; i++) {
         const a = (i / SPIKES) * TAU - Math.PI / 2
         let v =
-          Math.sin(a * 3 + t * 1.7) * 0.5 + Math.sin(a * 7 - t * 1.1) * 0.3 + Math.sin(a * 17 + t * 2.9) * 0.2
+          Math.sin(a * 3 + t * 1.7) * 0.5 +
+          Math.sin(a * 7 - t * 1.1) * 0.3 +
+          Math.sin(a * 17 + t * 2.9) * 0.2 +
+          w5 * Math.sin(a * 23 - t * 4.2) * 0.18
         v = ((v + 1) / 2) ** 2
         if (s.mode === 'listening' && !reduced) v += Math.random() * 0.35
         if (s.mode === 'speaking') v *= 0.55 + 0.45 * Math.abs(Math.sin(t * 7 + a))
@@ -117,47 +207,109 @@ export default function Orb({ mode = 'idle', className = '', track = true }) {
           d = Math.min(d, TAU - d)
           v += 1.4 * Math.exp(-(d * d) / 0.06)
         }
-        const energy = v * s.amp
+        const energy = v * s.amp * tierAmpBoost
         const len = R * 0.015 + energy * R * 0.26
         const cos = Math.cos(a)
         const sin = Math.sin(a)
-        const path = energy > 0.32 ? hot : dim
+        const path = energy > (0.32 - w5 * 0.07 - w3 * 0.04) ? hot : dim
         path.moveTo(cx + cos * (rRing - len * 0.25), cy + sin * (rRing - len * 0.25))
         path.lineTo(cx + cos * (rRing + len), cy + sin * (rRing + len))
       }
       ctx.lineCap = 'round'
       ctx.lineWidth = Math.max(1, R * 0.0075)
-      ctx.strokeStyle = `rgba(220,20,60,${0.35 + 0.3 * glow})`
+      ctx.strokeStyle =
+        w5 > 0.5
+          ? `rgba(255, 65, 90, ${0.42 + 0.3 * glow})`
+          : w3 > 0.5
+            ? `rgba(232, 110, 45, ${0.38 + 0.3 * glow})`
+            : `rgba(220, 20, 60, ${0.35 + 0.3 * glow})`
       ctx.stroke(dim)
       ctx.save()
-      ctx.shadowColor = '#ff5466'
-      ctx.shadowBlur = R * 0.05
-      ctx.strokeStyle = '#ff6a7a'
+      ctx.shadowColor = w5 > 0.5 ? '#ffd166' : w3 > 0.5 ? '#ff9f1c' : '#ff5466'
+      ctx.shadowBlur = R * (0.05 + w5 * 0.03)
+      ctx.strokeStyle = w5 > 0.5 ? '#ffe180' : w3 > 0.5 ? '#ffb84d' : '#ff6a7a'
       ctx.stroke(hot)
       ctx.restore()
 
-      // inner hairline ring, dashed
+      // 4. Inner hairline ring, dashed (plus counter-rotating Architect/Operator ring)
       ctx.save()
       ctx.setLineDash([R * 0.01, R * 0.03])
       ctx.lineDashOffset = -t * R * 0.04
-      ctx.strokeStyle = 'rgba(255,84,102,0.28)'
+      ctx.strokeStyle =
+        w5 > 0.5
+          ? 'rgba(255, 209, 102, 0.52)'
+          : w3 > 0.5
+            ? 'rgba(232, 163, 61, 0.42)'
+            : 'rgba(255, 84, 102, 0.28)'
       ctx.lineWidth = Math.max(1, R * 0.004)
       ctx.beginPath()
       ctx.arc(cx, cy, rRing * 0.84, 0, TAU)
       ctx.stroke()
       ctx.restore()
 
-      // the moon
-      const rS = R * 0.34 * (1 + Math.sin(t * 1.4) * 0.018 + s.flare * 0.04)
+      // Secondary inner geometric ring for L3 / L5
+      if (outerWeight > 0.02) {
+        ctx.save()
+        ctx.translate(cx, cy)
+        ctx.rotate(t * (0.35 + w5 * 0.3))
+        ctx.setLineDash([R * 0.022, R * 0.018])
+        ctx.strokeStyle =
+          w5 > 0.5
+            ? `rgba(255, 84, 102, ${0.55 * outerWeight})`
+            : `rgba(255, 120, 70, ${0.38 * outerWeight})`
+        ctx.lineWidth = Math.max(1, R * 0.0045)
+        ctx.beginPath()
+        ctx.arc(0, 0, rRing * 0.74, 0, TAU)
+        ctx.stroke()
+
+        // L5 Architect 4-point solar diamond nodes on inner ring
+        if (w5 > 0.05) {
+          ctx.setLineDash([])
+          ctx.fillStyle = `rgba(255, 209, 102, ${0.85 * w5})`
+          const dRad = rRing * 0.74
+          const dSize = R * 0.016 * w5
+          for (let q = 0; q < 4; q++) {
+            const qa = (q / 4) * TAU
+            const dx = Math.cos(qa) * dRad
+            const dy = Math.sin(qa) * dRad
+            ctx.beginPath()
+            ctx.arc(dx, dy, dSize, 0, TAU)
+            ctx.fill()
+          }
+        }
+        ctx.restore()
+      }
+
+      // 5. The Moon (Morphs from Blood Moon -> Molten Moon -> Total Eclipse in L5)
+      const rS = R * 0.34 * (1 + Math.sin(t * 1.4) * 0.018 + s.flare * 0.04 + s.tierFlare * 0.06)
       ctx.save()
-      ctx.shadowColor = `rgba(220,20,60,${0.75 * Math.min(1, glow)})`
-      ctx.shadowBlur = R * 0.16
+      ctx.shadowColor =
+        w5 > 0.5
+          ? `rgba(255, 190, 70, ${0.85 * Math.min(1.2, glow)})`
+          : w3 > 0.5
+            ? `rgba(232, 130, 45, ${0.8 * Math.min(1.1, glow)})`
+            : `rgba(220, 20, 60, ${0.75 * Math.min(1, glow)})`
+      ctx.shadowBlur = R * (0.16 + w5 * 0.08 + w3 * 0.04)
       const body = ctx.createRadialGradient(cx - rS * 0.35, cy - rS * 0.4, rS * 0.04, cx, cy, rS)
-      body.addColorStop(0, '#ffc2c8')
-      body.addColorStop(0.16, '#ff5466')
-      body.addColorStop(0.52, '#b0102e')
-      body.addColorStop(0.86, '#4a0611')
-      body.addColorStop(1, '#1c0207')
+      if (w5 > 0.5) {
+        body.addColorStop(0, '#fff3b0')
+        body.addColorStop(0.18, '#ffd166')
+        body.addColorStop(0.5, '#ff1e42')
+        body.addColorStop(0.84, '#6b0518')
+        body.addColorStop(1, '#1c0207')
+      } else if (w3 > 0.5) {
+        body.addColorStop(0, '#ffe8b8')
+        body.addColorStop(0.18, '#ff8547')
+        body.addColorStop(0.54, '#c4162b')
+        body.addColorStop(0.86, '#4f0812')
+        body.addColorStop(1, '#1c0207')
+      } else {
+        body.addColorStop(0, '#ffc2c8')
+        body.addColorStop(0.16, '#ff5466')
+        body.addColorStop(0.52, '#b0102e')
+        body.addColorStop(0.86, '#4a0611')
+        body.addColorStop(1, '#1c0207')
+      }
       ctx.fillStyle = body
       ctx.beginPath()
       ctx.arc(cx, cy, rS, 0, TAU)
@@ -169,11 +321,29 @@ export default function Orb({ mode = 'idle', className = '', track = true }) {
       ctx.arc(cx, cy, rS, 0, TAU)
       ctx.clip()
 
-      // slow veins under the surface
-      ctx.strokeStyle = 'rgba(40,0,8,0.4)'
+      // L5 Eclipse Umbra: dark void disc inside the blazing solar corona
+      if (w5 > 0.02) {
+        const umbraR = rS * 0.82 * w5
+        const umbra = ctx.createRadialGradient(cx, cy, umbraR * 0.15, cx, cy, umbraR)
+        umbra.addColorStop(0, `rgba(9, 2, 4, ${0.95 * w5})`)
+        umbra.addColorStop(0.78, `rgba(22, 4, 9, ${0.9 * w5})`)
+        umbra.addColorStop(1, `rgba(90, 8, 22, 0)`)
+        ctx.fillStyle = umbra
+        ctx.beginPath()
+        ctx.arc(cx, cy, umbraR, 0, TAU)
+        ctx.fill()
+      }
+
+      // slow veins under the surface (glow molten gold/crimson in elevated tiers)
+      ctx.strokeStyle =
+        w5 > 0.5
+          ? 'rgba(255, 209, 102, 0.36)'
+          : w3 > 0.5
+            ? 'rgba(255, 165, 70, 0.28)'
+            : 'rgba(40, 0, 8, 0.4)'
       ctx.lineWidth = Math.max(1, rS * 0.018)
       for (let k = 0; k < 6; k++) {
-        const base = (k / 6) * TAU + t * 0.15
+        const base = (k / 6) * TAU + t * (0.15 + w3 * 0.08 + w5 * 0.18)
         ctx.beginPath()
         ctx.moveTo(cx + Math.cos(base) * rS * 1.05, cy + Math.sin(base) * rS * 1.05)
         ctx.quadraticCurveTo(
@@ -194,21 +364,36 @@ export default function Orb({ mode = 'idle', className = '', track = true }) {
       ctx.fillStyle = iris
       ctx.fillRect(cx - rS, cy - rS, rS * 2, rS * 2)
 
-      const ph = rS * 0.8
-      const pw = rS * s.pupil * 2
+      const ph = rS * (0.8 + w5 * 0.06)
+      const pw = rS * (s.pupil + s.tierFlare * 0.12) * 2
       ctx.save()
-      ctx.shadowColor = 'rgba(255,84,102,0.55)'
-      ctx.shadowBlur = rS * 0.12
+      ctx.shadowColor =
+        w5 > 0.5
+          ? 'rgba(255, 209, 102, 0.85)'
+          : w3 > 0.5
+            ? 'rgba(232, 163, 61, 0.7)'
+            : 'rgba(255, 84, 102, 0.55)'
+      ctx.shadowBlur = rS * (0.12 + w5 * 0.08)
       ctx.fillStyle = '#070203'
       ctx.beginPath()
       ctx.moveTo(px, py - ph)
       ctx.quadraticCurveTo(px + pw, py, px, py + ph)
       ctx.quadraticCurveTo(px - pw, py, px, py - ph)
       ctx.fill()
+
+      // Illuminated pupil rim for L3 & L5 so the slit cuts visibly through the eclipse
+      if (outerWeight > 0.05) {
+        ctx.strokeStyle =
+          w5 > 0.5
+            ? `rgba(255, 209, 102, ${0.85 * w5})`
+            : `rgba(255, 160, 75, ${0.55 * w3})`
+        ctx.lineWidth = Math.max(1, rS * 0.016)
+        ctx.stroke()
+      }
       ctx.restore()
 
       // wet highlight
-      ctx.fillStyle = 'rgba(255,235,238,0.32)'
+      ctx.fillStyle = w5 > 0.5 ? 'rgba(255, 245, 215, 0.42)' : 'rgba(255, 235, 238, 0.32)'
       ctx.beginPath()
       ctx.ellipse(cx - rS * 0.42, cy - rS * 0.46, rS * 0.16, rS * 0.08, -0.6, 0, TAU)
       ctx.fill()
@@ -231,5 +416,12 @@ export default function Orb({ mode = 'idle', className = '', track = true }) {
     }
   }, [track])
 
-  return <canvas ref={canvasRef} className={`block h-full w-full ${className}`} role="img" aria-label={`Nightmare is ${mode}`} />
+  return (
+    <canvas
+      ref={canvasRef}
+      className={`block h-full w-full ${className}`}
+      role="img"
+      aria-label={`Nightmare is ${mode} (Clearance Level ${clearanceLevel})`}
+    />
+  )
 }

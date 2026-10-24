@@ -31,7 +31,7 @@ class ActionError(Exception):
 
 @dataclass
 class ActionPlan:
-    kind: str  # open_app | open_folder | open_project_in | run_task | run_command
+    kind: str  # open_app | open_folder | open_project_in | run_task | run_command | run_dev_task
     label: str  # shown to the user, also on the confirmation prompt
     argv: list | None = None
     cwd: Path | None = None
@@ -39,6 +39,8 @@ class ActionPlan:
     wait: bool = False
     timeout: int = 30
     needs_confirm: bool = False
+    detail: str = ""
+    extra: dict | None = None
 
 
 @dataclass
@@ -148,6 +150,20 @@ def plan_run_task(reg: Registry, task_id: str, desktop_root: Path) -> ActionPlan
     )
 
 
+def plan_run_dev_task(task: "DevTask", project_dir: Path) -> ActionPlan:
+    cwd = task.cwd or project_dir
+    return ActionPlan(
+        "run_dev_task",
+        f"{task.label} in {project_dir.name}",
+        argv=task.argv,
+        cwd=cwd,
+        wait=task.wait,
+        timeout=task.timeout,
+        needs_confirm=True,  # Routine dev tasks found in code always require a click
+        detail=task.detail,
+    )
+
+
 def plan_run_command(command: str, desktop_root: Path, allowed: bool) -> ActionPlan:
     if not allowed:
         raise ActionError(
@@ -166,6 +182,96 @@ def plan_run_command(command: str, desktop_root: Path, allowed: bool) -> ActionP
         wait=True,
         timeout=30,
         needs_confirm=True,
+    )
+
+
+def plan_restart_nightmare(repo_root: Path) -> ActionPlan:
+    script = repo_root / "scripts" / "start_nightmare.ps1"
+    argv = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Rebuild", "-Background"]
+    return ActionPlan(
+        "system_authority",
+        "restart Nightmare (rebuild and background)",
+        argv=argv,
+        cwd=repo_root,
+        wait=False,
+        needs_confirm=True,
+    )
+
+
+def plan_restart_pc() -> ActionPlan:
+    return ActionPlan(
+        "system_authority",
+        "restart the PC",
+        argv=["shutdown", "/r", "/t", "10"],
+        wait=False,
+        needs_confirm=True,
+    )
+
+
+def plan_shutdown_pc() -> ActionPlan:
+    return ActionPlan(
+        "system_authority",
+        "shut down the PC",
+        argv=["shutdown", "/s", "/t", "10"],
+        wait=False,
+        needs_confirm=True,
+    )
+
+
+def plan_cancel_shutdown() -> ActionPlan:
+    return ActionPlan(
+        "system_authority",
+        "cancel PC shutdown",
+        argv=["shutdown", "/a"],
+        wait=True,
+        timeout=10,
+        needs_confirm=False,
+    )
+
+
+def plan_send_team_nudge(
+    task_id: str,
+    assigned_team: str,
+    owner_email: str,
+    task_name: str,
+    current_count: float,
+    target_count: float,
+    days_stale: float,
+    subject: str = "",
+    body: str = "",
+    smtp_host: str | None = None,
+    smtp_port: int | None = None,
+    smtp_user: str | None = None,
+    smtp_app_password: str | None = None,
+) -> ActionPlan:
+    curr_str = f"{int(current_count)}" if current_count.is_integer() else f"{current_count}"
+    tgt_str = f"{int(target_count)}" if target_count.is_integer() else f"{target_count}"
+    days_str = f"{int(days_stale)}" if days_stale.is_integer() else f"{days_stale:.1f}"
+
+    summary = f"{assigned_team}: {task_name} — {curr_str} / {tgt_str} completed, no update for {days_str}+ days"
+    label = f"Send reminder email to {owner_email}"
+    detail = f"{summary}\n\nRecipient: {owner_email}\nSubject: {subject}\n\nDraft:\n{body}"
+
+    return ActionPlan(
+        kind="send_team_nudge",
+        label=label,
+        needs_confirm=True,
+        detail=detail,
+        extra={
+            "task_id": task_id,
+            "assigned_team": assigned_team,
+            "owner_email": owner_email,
+            "task_name": task_name,
+            "current_count": current_count,
+            "target_count": target_count,
+            "days_stale": days_stale,
+            "subject": subject,
+            "body": body,
+            "smtp_host": smtp_host,
+            "smtp_port": smtp_port,
+            "smtp_user": smtp_user,
+            "smtp_app_password": smtp_app_password,
+        },
     )
 
 
@@ -232,6 +338,24 @@ def _open_path(path: Path) -> None:
 
 def execute(plan: ActionPlan) -> ActionResult:
     try:
+        if plan.kind == "send_team_nudge":
+            from ..tools.email_notifier import send_nudge_email
+            extra = plan.extra or {}
+            to_email = extra.get("owner_email", "")
+            subject = extra.get("subject", "")
+            body = extra.get("body", "")
+            if not to_email:
+                raise ActionError("No recipient email specified for team reminder.")
+            ok, msg = send_nudge_email(
+                to_email=to_email,
+                subject=subject,
+                body=body,
+                host=extra.get("smtp_host"),
+                port=extra.get("smtp_port"),
+                user=extra.get("smtp_user"),
+                password=extra.get("smtp_app_password"),
+            )
+            return ActionResult(ok, msg)
         if plan.kind == "open_folder":
             if plan.path is None or not plan.path.is_dir():
                 raise ActionError("That folder no longer exists.")

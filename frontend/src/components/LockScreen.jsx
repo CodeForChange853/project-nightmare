@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+﻿import { useEffect, useRef } from 'react'
 import gsap from 'gsap'
 import Orb from './Orb'
 
@@ -55,7 +55,7 @@ export default function LockScreen({ pin, setPin, error, busy, onSubmit }) {
             disabled={busy || !pin.trim()}
             className="rounded-xl bg-gradient-to-b from-crimson to-[#9e0d2b] px-4 py-3 text-[14px] font-semibold text-white shadow-[0_10px_30px_-10px_rgba(220,20,60,0.8)] hover:brightness-110 disabled:opacity-40"
           >
-            {busy ? 'Checking…' : 'Unlock'}
+            {busy ? 'Checkingâ€¦' : 'Unlock'}
           </button>
         </form>
       </section>

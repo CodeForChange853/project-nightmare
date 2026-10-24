@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+﻿import { useCallback, useEffect, useRef } from 'react'
 
 /**
  * Opens the microphone only while you are talking, and exposes an AnalyserNode so the

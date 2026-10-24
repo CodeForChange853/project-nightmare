@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import os
 import time
 
@@ -25,7 +25,9 @@ class Fake(LLMProvider):
 @pytest.fixture
 def orch(settings, registry):
     provider = Fake()
-    return Orchestrator(settings, provider, registry, Audit(settings.db_path)), provider
+    o = Orchestrator(settings, provider, registry, Audit(settings.db_path))
+    o.clearance.set_level("default", 3)
+    return o, provider
 
 
 def say(orch, text, readonly=False):

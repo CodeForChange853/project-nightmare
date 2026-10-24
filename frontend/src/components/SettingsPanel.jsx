@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import gsap from 'gsap'
 import { checkAppsEntry, closeSettings, getAppsConfig, openSettings, saveAppsConfig } from '../api'
 import Icon from './Icon'
@@ -112,7 +112,7 @@ function EntryForm({ kind, id, spec, saved, projects, shells, onChange, onCheck,
 
       <Field
         label="Spoken names"
-        hint={`Comma separated. Saying “${kind.key === 'apps' ? 'open' : 'run'} ${spec.aliases?.[0] || id}” picks this ${kind.noun}.`}
+        hint={`Comma separated. Saying â€œ${kind.key === 'apps' ? 'open' : 'run'} ${spec.aliases?.[0] || id}â€ picks this ${kind.noun}.`}
       >
         <input
           className={inputCls}
@@ -143,7 +143,7 @@ function EntryForm({ kind, id, spec, saved, projects, shells, onChange, onCheck,
       {kind.key === 'apps' ? (
         <>
           <Toggle checked={Boolean(spec.project_arg)} onChange={(v) => set('project_arg', v)}>
-            Can open a project (“open bims in {spec.aliases?.[0] || id}”)
+            Can open a project (â€œopen bims in {spec.aliases?.[0] || id}â€)
           </Toggle>
           {spec.project_arg && (
             <Field label="Flag before the folder (optional)" hint="Only if the program needs one, e.g. -d for Windows Terminal.">
@@ -216,7 +216,7 @@ function EntryForm({ kind, id, spec, saved, projects, shells, onChange, onCheck,
             disabled={checking || !argv[0]?.trim()}
             className="flex items-center gap-1.5 rounded-lg border border-scar/60 px-2.5 py-1 text-[12px] text-ash hover:text-bone disabled:opacity-40"
           >
-            <Icon name="check" size={13} /> {checking ? 'Checking…' : 'Check'}
+            <Icon name="check" size={13} /> {checking ? 'Checkingâ€¦' : 'Check'}
           </button>
           <span className="text-[11px] text-smoke">Looks the program up. Nothing is run.</span>
         </div>
@@ -229,7 +229,7 @@ function EntryForm({ kind, id, spec, saved, projects, shells, onChange, onCheck,
             {'folder' in check && (
               <>
                 <dt className="text-smoke">Folder</dt>
-                <dd className="break-all text-bone">{check.folder || '—'}</dd>
+                <dd className="break-all text-bone">{check.folder || 'â€”'}</dd>
               </>
             )}
             <dt className="text-smoke">Asks first</dt>
@@ -514,7 +514,7 @@ export default function SettingsPanel({ onClose }) {
               disabled={busy || !pin.trim()}
               className="rounded-xl bg-gradient-to-b from-crimson to-[#9e0d2b] px-4 py-3 text-[14px] font-semibold text-white shadow-[0_10px_30px_-10px_rgba(220,20,60,0.8)] hover:brightness-110 disabled:opacity-40"
             >
-              {busy ? 'Checking…' : 'Open settings'}
+              {busy ? 'Checkingâ€¦' : 'Open settings'}
             </button>
           </form>
         ) : !draft ? (
@@ -575,7 +575,7 @@ export default function SettingsPanel({ onClose }) {
                   </form>
                 )}
                 {entries.length === 0 && newId == null && (
-                  <p className="p-3 text-[12px] text-smoke">No {tab} yet. Use “Add {kind.noun}”.</p>
+                  <p className="p-3 text-[12px] text-smoke">No {tab} yet. Use â€œAdd {kind.noun}â€.</p>
                 )}
                 <ul className="flex flex-col gap-1">
                   {entries.map(([id, spec]) => {
@@ -705,7 +705,7 @@ export default function SettingsPanel({ onClose }) {
                   onClick={save}
                   className="rounded-xl bg-gradient-to-b from-crimson to-[#9e0d2b] px-4 py-2 text-[13px] font-semibold text-white shadow-[0_10px_30px_-10px_rgba(220,20,60,0.8)] hover:brightness-110 disabled:opacity-40"
                 >
-                  {busy ? 'Saving…' : 'Save changes'}
+                  {busy ? 'Savingâ€¦' : 'Save changes'}
                 </button>
               </div>
             </footer>

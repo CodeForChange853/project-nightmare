@@ -14,6 +14,7 @@ from urllib.parse import quote_plus
 from ..config import Settings
 from ..tools.fs_reader import EXPLICIT_DOC_RE, Resolution, normalize, resolve_project
 from .actions import Registry
+from .clearance import INTENT_CLEARANCE_MAP
 
 RAW_CMD = re.compile(
     r"^\s*(?:nightmare[, ]+)?(?:run|execute)\s+(?:the\s+)?(?:shell\s+)?command[: ]+(?P<cmd>.+?)\s*$",
@@ -73,7 +74,7 @@ LIST_NOTES_RE = re.compile(
 )
 DB_OPEN_RE = re.compile(
     LEAD
-    + r"(?:database\s+(?:access\s+)?open|open\s+(?:the\s+)?database(?:\s+access)?|access\s+(?:the\s+)?database"
+    + r"(?:database\s+(?:access\s+)?open|open\s+(?:the\s+)?database(?:\s+access)?|open\s+access\s+database|access\s+(?:the\s+)?database"
     r"|show\s+(?:me\s+)?(?:the\s+)?database|unlock\s+(?:the\s+)?database)\s*[.!?]*$",
     re.I,
 )
@@ -110,6 +111,35 @@ CITY_WEATHER_RE = re.compile(
     r"^\s*(?:check\s+|what(?:'s|\s+is)\s+(?:the\s+)?)?(?P<city>[a-zA-Z]{3,20})\s+(?:city\s+)?(?:weather|forecast|temperature)\s*[?.!]*$",
     re.I,
 )
+OPEN_HELPER_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:open|show|display|launch|view)\s+(?:the\s+)?(?:developer\s+)?helper(?:\s+function|\s+ui|\s+panel|\s+window)?\s*[.!?]*$|"
+    r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?developer\s+helper(?:\s+function|\s+ui|\s+panel|\s+window)?\s*[.!?]*$",
+    re.I,
+)
+CLEARANCE_ELEVATE_RE = re.compile(
+    LEAD
+    + r"(?:(?:open|elevate(?:\s+to)?|unlock)\s+(?:nightmare\s+)?level\s+(?P<lvl1>[135])(?:\s+access)?|"
+    r"level\s+(?P<lvl2>[135])\s+access)\s*[.!?]*$",
+    re.I,
+)
+CLEARANCE_LOCKDOWN_RE = re.compile(
+    LEAD
+    + r"(?:(?:emergency\s+)?lock\s*down|drop\s+to\s+level\s+1|reset\s+clearance(?:\s+to\s+level\s+1)?)\s*[.!?]*$",
+    re.I,
+)
+CLEARANCE_STATUS_RE = re.compile(
+    LEAD
+    + r"(?:what(?:'s|\s+is)\s+(?:my\s+)?(?:current\s+)?clearance(?:\s+level)?|"
+    r"check\s+(?:my\s+)?clearance(?:\s+level)?|"
+    r"current\s+clearance(?:\s+level)?|"
+    r"what\s+clearance\s+level\s+am\s+i(?:\s+on)?|"
+    r"what\s+level\s+am\s+i(?:\s+on)?)\s*[?.!]*$",
+    re.I,
+)
+CLEAR_CACHE_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:clear|wipe|reset|refresh|flush)\s+(?:the\s+)?(?:summary\s+)?cache\s*[.!?]*$",
+    re.I,
+)
 QUICK_TIME_RE = re.compile(
     r"\b(?:what\s+time\s+is\s+it|what(?:'s|\s+is)\s+the\s+(?:current\s+)?time|current\s+time|"
     r"what\s+(?:day|date)\s+is\s+(?:it|today)|today(?:'s|\s+is)\s+date)\b",
@@ -130,7 +160,7 @@ QUICK_THANKS_RE = re.compile(
 )
 QUICK_NAME_RE = re.compile(
     r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:what(?:'s|\s+is|\s+s)\s+your\s+name(?:\s+again)?"
-    r"|who\s+are\s+you|what\s+are\s+you|what\s+should\s+i\s+call\s+you)\s*[?.!]*$",
+    r"|who\s+are\s+you(?:\s+again)?|what\s+are\s+you|what\s+should\s+i\s+call\s+you)\s*[?.!]*$",
     re.I,
 )
 # well-known desktop programs; if one is asked for and is not in apps.json, say so at once
@@ -146,12 +176,156 @@ GIT_STATUS_RE = re.compile(
     r"\b(?:git\s+(?:status|branch)|what\s+branch\s+is|uncommitted\s+changes)\b",
     re.I,
 )
+RERUN_TASK_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?"
+    r"(?:run\s+(?:it|that)\s+again|run\s+again|re-?run|retry\s+(?:last\s+task|it|that))\s*[.!?]*$",
+    re.I,
+)
+WORKSPACE_CHANGES_RE = re.compile(
+    r"\b("
+    r"what\s+changed\s+(?:since\s+(?:yesterday|last\s+week)|today|recently)|"
+    r"changes\s+since\s+(?:yesterday|today|last\s+week)|"
+    r"recent\s+changes(?:\s+across\s+projects)?|"
+    r"what\s+did\s+i\s+(?:change|commit|work\s+on)\s+(?:yesterday|today|recently)"
+    r")\b",
+    re.I,
+)
+WORK_PRIORITIES_RE = re.compile(
+    r"\b("
+    r"what\s+should\s+i\s+(?:work\s+on|do(?:\s+next)?|focus\s+on)|"
+    r"which\s+project\s+should\s+i\s+work\s+on|"
+    r"what\s+project\s+(?:should\s+i|needs)\s+work|"
+    r"where\s+should\s+i\s+(?:start|focus)|"
+    r"(?:work|project)\s+priorit(?:y|ies)"
+    r")\b",
+    re.I,
+)
+WORKSPACE_BRIEFING_RE = re.compile(
+    r"\b("
+    r"(?:workspace|daily|morning)\s+(?:briefing|overview|summary|status)|"
+    r"(?:give\s+me\s+a\s+|tell\s+me\s+the\s+)?briefing|"
+    r"workspace\s+health"
+    r")\b",
+    re.I,
+)
+DEV_TASK_KIND_RE = re.compile(
+    r"\b(?P<kind>npm\s+tests?|pytest|tests?|build|dev|lint|preview|typecheck|type-check)\b",
+    re.I,
+)
 RUN_VERB = re.compile(r"\b(start|run|launch|execute|kick off|fire up|spin up)\b")
 OPEN_VERB = re.compile(r"\b(open|launch|start|run|fire up)\b")
 FOLDER_WORD = re.compile(r"\b(folder|directory|explorer|file explorer)\b")
 IN_WITH = re.compile(r"\b(in|with|using)\b")
 LIST_PROJECTS = re.compile(
-    r"\b(list|show|which|what)\b.*\bprojects\b|\bprojects\s+on\s+(?:my\s+)?desktop\b"
+    r"\b(list|show|which|what|how\s+many|count)\b.*\bprojects\b|\bprojects\s+on\s+(?:my\s+)?desktop\b"
+)
+VOICE_SETTINGS_RE = re.compile(
+    LEAD
+    + r"(?:(?:switch|change|set|use)\s+(?:the\s+)?(?:voice\s+to|to\s+)?(?P<g1>male|female)(?:\s+voice)?|(?P<g2>male|female)\s+voice)\s*[.!?]*$",
+    re.I,
+)
+CONVERSATION_HISTORY_RE = re.compile(
+    r"\b(?:(?:what\s+did\s+we|what\s+were\s+we|what\s+was\s+our|what\s+have\s+we)\s+(?:discuss(?:ed)?|talk(?:ed)?\s+about|conversation(?:\s+was)?)|"
+    r"earlier\s+what\s+(?:we\s+have\s+discussed|did\s+we\s+discuss)|"
+    r"what\s+did\s+i\s+(?:ask|say)(?:\s+earlier)?|"
+    r"recap\s+(?:our\s+)?conversation|previous\s+conversation)\b",
+    re.I,
+)
+SEARCH_PROJECTS_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?"
+    r"(?:search\s+(?:all\s+)?(?:projects?|docs?|code|repos?)\s+(?:for|about)|"
+    r"find\s+in\s+projects?|"
+    r"search\s+project\s+(?:docs|documentation|notes)\s+(?:for|about)?)\s+"
+    r"(?P<query>.+?)\s*[.!?]*$",
+    re.I,
+)
+FIND_OPEN_FILE_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?"
+    r"(?:"
+    r"find\s+(?:the\s+|a\s+|an\s+)?(?:file|doc|document|docs|presentation|spreadsheet)?(?:\s+related\s+to|\s+about)?\s+(?P<q1>.+?)\s+(?:and\s+)?open\s+(?:it\s+)?(?:(?:in|on|with|using)\s+(?P<app1>[a-zA-Z\s]+?))?|"
+    r"find\s+(?:the\s+|a\s+|an\s+)?(?:file|doc|document|docs|presentation|spreadsheet)(?:\s+related\s+to|\s+about)?\s+(?P<q2>.+?)|"
+    r"(?:open\s*file|open\s+(?:the\s+|a\s+|an\s+)?(?:file|doc|document|docs|presentation|spreadsheet)(?:\s+related\s+to|\s+about)?)\s+(?P<q3>.+?)(?:\s+(?:in|on|with|using)\s+(?P<app3>[a-zA-Z\s]+?))?|"
+    r"open\s+(?P<q4>[a-zA-Z0-9_\-.\s]+?)\s+(?:in|on|with|using)\s+(?P<app4>word|powerpoint|excel|notepad|sheets|slides|acrobat|wordpad|doc|docx|ppt|pptx|xls|xlsx|pdf)|"
+    r"open\s+(?P<q5>[a-zA-Z0-9_\-.\s]+?)\s+(?P<ext5>ppt|pptx|doc|docx|xls|xlsx|pdf|txt|md)|"
+    r"open\s+(?P<q6>[a-zA-Z0-9_\-.\s]+?\.(?:pptx?|docx?|xlsx?|pdf|txt|md))|"
+    r"open\s+(?:the\s+|a\s+|an\s+)?(?P<q7>[a-zA-Z0-9_\-.\s]*?\b(?:checklist|document|doc|paper|chapter|report|presentation|spreadsheet|notes|draft|outline)\b[a-zA-Z0-9_\-.\s]*)"
+    r")\s*[.!?]*$",
+    re.I,
+)
+PPT_OPEN_SLIDE_RE = re.compile(
+    LEAD
+    + r"(?:"
+    r"(?:find\s+and\s+open|open|launch)\s+(?:the\s+|a\s+|an\s+)?(?P<q1>.+?)\s+(?:ppt|pptx|presentation|slides?)(?:\s+(?:to|in)\s+powerpoint)?\s+(?:and\s+)?(?:show|display|go\s+to)?\s*(?:the\s+)?slide\s+(?P<s1>\d+|[a-zA-Z]+)|"
+    r"(?:find\s+and\s+open|open|launch)\s+(?:the\s+|a\s+|an\s+)?(?P<q2>.+?)(?:\s+(?:presentation|slides?|ppt|pptx))?\s+(?:at|on|to)\s+slide\s+(?P<s2>\d+|[a-zA-Z]+)|"
+    r"(?:find\s+and\s+open|open|launch)\s+(?:the\s+|a\s+|an\s+)?(?P<q3>.+?)\s+in\s+powerpoint\s+(?:(?:at|on)\s+|(?:and\s+)?(?:show|display|go\s+to)\s+)?(?:the\s+)?slide\s+(?P<s3>\d+|[a-zA-Z]+)|"
+    r"(?:find\s+and\s+open|open|launch)\s+(?:the\s+|a\s+|an\s+)?(?P<q4>.+?)\s+(?:ppt|pptx|presentation|slides?)(?:\s+(?:to|in)\s+powerpoint)?\s+(?:and\s+)?(?:show|display|go\s+to)\s+(?:the\s+)?slide\s+(?:about|on|regarding)\s+(?P<t4>.+?)"
+    r")\s*[.!?]*$",
+    re.I,
+)
+PPT_CONTROL_RE = re.compile(
+    LEAD
+    + r"(?:"
+    r"(?:go\s+to|jump\s+to|switch\s+to|move\s+to|show|display)\s+(?:the\s+)?slide\s+(?P<s1>\d+|[a-zA-Z]+)|"
+    r"slide\s+(?P<s2>\d+)|"
+    r"(?P<next>next\s+slide|advance\s+slide)|"
+    r"(?P<prev>previous\s+slide|prev\s+slide|back\s+(?:one\s+)?slide)|"
+    r"(?:show|display|go\s+to|jump\s+to|find)\s+(?:the\s+)?slide\s+(?:about|on|regarding)\s+(?P<topic>.+?)"
+    r")\s*[.!?]*$",
+    re.I,
+)
+SYSTEM_COMMAND_RE = re.compile(
+    LEAD
+    + r"(?:"
+    r"(?P<restart_nightmare>rerun\s+yourself|restart\s+nightmare|reboot\s+nightmare)|"
+    r"(?P<restart_pc>restart\s+(?:my\s+|the\s+)?pc|reboot\s+(?:my\s+|the\s+)?(?:pc|computer|system|machine))|"
+    r"(?P<shutdown_pc>shut\s*down\s+(?:my\s+|the\s+)?(?:pc|computer|system|machine)|power\s+off\s+(?:my\s+|the\s+)?(?:pc|computer|system))|"
+    r"(?P<cancel_shutdown>cancel\s+(?:the\s+)?shut\s*down|abort\s+(?:the\s+)?shut\s*down)"
+    r")\s*[.!?]*$",
+    re.I,
+)
+TEAM_PROGRESS_RE = re.compile(
+    LEAD
+    + r"(?:"
+    r"(?:show|open|check|display|view)\s+(?:the\s+)?(?:(?:team(?:\s+\d+|\s+[a-z0-9_-]+)?\s+)?(?:timeline\s+tracker|timeline|progress|team\s+progress|quota|tracker))|"
+    r"open\s+(?:the\s+)?(?:citizengraph\s+)?timeline(?:\s+tracker)?|"
+    r"(?:citizengraph\s+)?timeline\s+tracker|"
+    r"(?:show\s+)?citizengraph\s+timeline|"
+    r"team\s+progress(?:\s+tracker)?|"
+    r"check\s+(?:the\s+)?team(?:\s+\d+|\s+[a-z0-9_-]+)?\s+progress"
+    r")(?:\s+(?:for|of|on)?\s*(?P<target>team\s*\d+|team\s*[a-z0-9_-]+))?\s*[.!?]*$",
+    re.I,
+)
+TIMELINE_DIFF_RE = re.compile(
+    LEAD
+    + r"(?:"
+    r"(?:what\s+(?:did\s+(?:my\s+)?team\s+update|changed?|change|is\s+different)\s+(?:in|on)\s+(?:the\s+)?(?:citizengraph\s+)?timeline(?:\s+from\s+(?:the\s+)?(?:gdrive|google\s+drive))?)|"
+    r"(?:what\s+change(?:d)?\s+in\s+the\s+(?:citizengraph\s+)?timeline(?:\s+from\s+(?:the\s+)?(?:gdrive|google\s+drive))?)|"
+    r"(?:compare\s+(?:the\s+)?(?:citizengraph\s+)?timeline(?:\s+with|\s+to|\s+against)\s+(?:the\s+)?(?:gdrive|google\s+drive))|"
+    r"(?:check\s+(?:the\s+)?(?:gdrive|google\s+drive)\s+timeline\s+updates?)|"
+    r"(?:check\s+(?:the\s+)?(?:citizengraph\s+)?timeline\s+diff)|"
+    r"(?:what\s+did\s+(?:my\s+)?team\s+update\s+in\s+the\s+(?:citizengraph\s+)?timeline)"
+    r")\s*[.!?]*$",
+    re.I,
+)
+APPROVE_EMAIL_RE = re.compile(
+    LEAD
+    + r"(?:"
+    r"approve\s+(?:the\s+)?(?:team\s+)?(?:reminder\s+)?email(?:\s+reminder)?|"
+    r"send\s+(?:the\s+)?(?:team\s+)?(?:reminder\s+)?email(?:\s+reminder)?|"
+    r"confirm\s+(?:the\s+)?(?:team\s+)?email"
+    r")\s*[.!?]*$",
+    re.I,
+)
+GITHUB_CHECK_RE = re.compile(
+    r"\b("
+    r"check\s+(?:my\s+)?github(?:\s+repositories|\s+repos)?"
+    r"(?:\s+for\s+(?:commits|pull\s+requests|merge\s+conflicts|conflicts|updates)(?:\s*(?:and|or|,|/)\s*(?:commits|pull\s+requests|merge\s+conflicts|conflicts|updates))*)?|"
+    r"github\s+(?:repo\s+)?check(?:s)?|"
+    r"github\s+status|"
+    r"check\s+(?:for\s+)?(?:merge\s+)?conflicts(?:\s+in\s+repos)?|"
+    r"check\s+(?:my\s+)?pull\s+requests"
+    r")\b",
+    re.I,
 )
 CROSS_PROJECT = re.compile(
     r"\b("
@@ -173,9 +347,9 @@ DOC_LOOKUP = re.compile(
 ANY_FILENAME_RE = re.compile(r"\b[a-z0-9_.-]+\.(?:md|txt|env|pem|key|json|yaml|yml|py|js)\b", re.I)
 PROGRESS = re.compile(
     r"\b("
-    r"progress|status|handoff|hand off|left off|leave off|where am i|update on|catch me up|"
+    r"progress|status|handoff|hand off|hand\s+of|handocks?|left off|leave off|where am i|update on|catch me up|"
     r"summary|summarize|summarise|check on|check project|read handoff|what did i do on|"
-    r"latest (?:on|of|for)|how (?:is|s) .+ going|what(?: is| s) going on with|"
+    r"latest (?:on|of|for)|latest\s+update|last\s+update|how (?:is|s) .+ going|what(?: is| s) going on with|"
     r"what(?: is| s) next|next (?:tasks?|steps?)|(?:to )?do next"
     r")\b"
 )
@@ -257,10 +431,23 @@ class Intent:
     url: str | None = None
     site: str | None = None
     query: str | None = None
+    voice_gender: str | None = None
+    slide: int | None = None
+    action: str | None = None
     history: tuple = ()  # recent (user, reply) turns, filled in by the orchestrator for chat
 
 
 def describe_intent(intent: Intent) -> str:
+    if intent.kind == "ppt_open_slide":
+        return f"ppt_open_slide → {intent.query} (slide {intent.slide or 1})"
+    if intent.kind == "ppt_control":
+        return f"ppt_control → {intent.action} {intent.slide or ''}".strip()
+    if intent.kind == "system_authority":
+        return f"system_authority → {intent.action}"
+    if intent.kind == "team_progress":
+        return f"team_progress → {intent.query or 'all teams'}"
+    if intent.kind == "approve_email":
+        return "approve_email"
     proj = None
     if intent.resolution and intent.resolution.matches:
         proj = intent.resolution.matches[0][0].name
@@ -282,6 +469,17 @@ def describe_intent(intent: Intent) -> str:
         return f"open_app → {intent.app_id}"
     if intent.kind == "run_task":
         return f"run_task → {intent.task_id}"
+    if intent.kind == "run_dev_task":
+        proj = intent.resolution.matches[0][0].name if intent.resolution and intent.resolution.matches else "?"
+        return f"run_dev_task → {intent.task_id} in {proj}"
+    if intent.kind == "rerun_task":
+        return "rerun_task"
+    if intent.kind == "workspace_changes":
+        return "workspace_changes"
+    if intent.kind == "work_priorities":
+        return "work_priorities"
+    if intent.kind == "workspace_briefing":
+        return "workspace_briefing"
     if intent.kind == "run_command":
         return f"run_command → {intent.command}"
     if intent.kind == "list_projects":
@@ -297,7 +495,7 @@ def describe_intent(intent: Intent) -> str:
     if intent.kind in {"complete_note", "delete_note"}:
         target = f"#{intent.note_id}" if intent.note_id is not None else f"“{intent.note_text or '?'}”"
         return f"{intent.kind} → {target}"
-    if intent.kind in {"db_open", "db_close", "settings_open", "settings_close", "reset_session"}:
+    if intent.kind in {"db_open", "db_close", "settings_open", "settings_close", "reset_session", "clear_cache"}:
         return intent.kind
     if intent.kind == "open_url":
         return f"open_url → {intent.site}" + (f" search “{intent.query}”" if intent.query else "")
@@ -305,6 +503,25 @@ def describe_intent(intent: Intent) -> str:
         return f"quick_reply → {intent.note_text or 'instant'}"
     if intent.kind == "usage":
         return "usage"
+    if intent.kind == "voice_settings":
+        return f"voice_settings → {intent.voice_gender or 'toggle'}"
+    if intent.kind == "conversation_history":
+        return "conversation_history"
+    if intent.kind == "search_projects":
+        return f"search_projects → {intent.query or 'all'}"
+    if intent.kind == "clearance_prompt":
+        return f"clearance_prompt → Level {intent.query or '3'}"
+    if intent.kind == "clearance_lockdown":
+        return "clearance_lockdown → Level 1"
+    if intent.kind == "clearance_status":
+        return "clearance_status"
+    if intent.kind == "open_file":
+        detail = intent.query or "?"
+        if intent.note_text:
+            detail += f" ({intent.note_text})"
+        return f"open_file → {detail}"
+    if intent.kind == "github_check":
+        return "github_check → tracked repos"
     return "chat (no command matched)"
 
 
@@ -394,6 +611,279 @@ def _web_target(text: str, n: str, registry: Registry) -> Intent | None:
     return Intent("open_url", text, url=home, site=label)
 
 
+def _match_open_file(text: str, n: str) -> Intent | None:
+    # 1. Exact FIND_OPEN_FILE_RE
+    m_open_file = FIND_OPEN_FILE_RE.match(text)
+    if m_open_file:
+        q = (
+            m_open_file.group("q1")
+            or m_open_file.group("q2")
+            or m_open_file.group("q3")
+            or m_open_file.group("q4")
+            or m_open_file.group("q5")
+            or m_open_file.group("q6")
+            or m_open_file.group("q7")
+            or ""
+        ).strip()
+        app_or_ext = (
+            m_open_file.group("app1")
+            or m_open_file.group("app3")
+            or m_open_file.group("app4")
+            or m_open_file.group("ext5")
+            or ""
+        ).strip()
+
+        # Check for parenthesized app hint, e.g. "LCRO Interview checklist.docx (word)"
+        m_paren = re.search(r"\s*\(\s*([a-zA-Z]+)\s*\)\s*$", q)
+        if m_paren:
+            paren_val = m_paren.group(1).lower()
+            if paren_val in {"word", "excel", "powerpoint", "ppt", "doc", "docx", "pdf", "notepad", "sheets", "slides"}:
+                q = q[: m_paren.start()].strip()
+                if not app_or_ext:
+                    app_or_ext = paren_val
+
+        return Intent("open_file", text, query=q, note_text=app_or_ext or None)
+
+    # 2. Pattern: <query> and open it in/on/with <app>
+    # e.g. "comments and find citizen graph chapter 1 docs and open it on word"
+    # or "ilcro interview checklist and open it in word"
+    m_and_open = re.search(
+        r"(?:(?:and\s+)?open\s+(?:it\s+)?(?:in|on|with|using)\s+(?P<app>[a-zA-Z\s]+?))\s*[.!?]*$",
+        text,
+        re.I,
+    )
+    if m_and_open:
+        raw_app = m_and_open.group("app").strip().lower()
+        app_tokens = set(raw_app.split())
+        is_file_app = bool(
+            app_tokens
+            & {
+                "word",
+                "powerpoint",
+                "excel",
+                "notepad",
+                "sheets",
+                "slides",
+                "acrobat",
+                "wordpad",
+                "reader",
+                "ppt",
+                "pptx",
+                "doc",
+                "docx",
+                "xls",
+                "xlsx",
+                "pdf",
+            }
+        )
+        if is_file_app:
+            query_part = text[: m_and_open.start()].strip()
+            clean_q = re.sub(
+                r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?",
+                "",
+                query_part,
+                flags=re.I,
+            )
+            clean_q = re.sub(
+                r"^\s*(?:comments?\s+(?:and\s+)?|so\s+|well\s+|can\s+you\s+|could\s+you\s+)",
+                "",
+                clean_q,
+                flags=re.I,
+            )
+            clean_q = re.sub(
+                r"^\s*(?:find|search\s+for|locate|look\s+up|get)\s+(?:the\s+|a\s+|an\s+)?(?:file|doc|document|presentation|spreadsheet)?(?:\s+related\s+to|\s+about)?\s*",
+                "",
+                clean_q,
+                flags=re.I,
+            )
+            clean_q = clean_q.strip(" .,?!")
+            if clean_q:
+                return Intent("open_file", text, query=clean_q, note_text=raw_app)
+
+    # 3. Pattern: open <query> in/on/with <app>
+    m_open_in = re.match(
+        r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?"
+        r"(?:(?:comments?\s+(?:and\s+)?|so\s+|well\s+|can\s+you\s+|could\s+you\s+))?"
+        r"open\s+(?:the\s+|a\s+|an\s+)?(?:file|doc|document|presentation|spreadsheet)?(?:\s+related\s+to|\s+about)?\s*"
+        r"(?P<q>.+?)\s+(?:in|on|with|using)\s+(?P<app>[a-zA-Z\s]+?)\s*[.!?]*$",
+        text,
+        re.I,
+    )
+    if m_open_in:
+        raw_app = m_open_in.group("app").strip().lower()
+        app_tokens = set(raw_app.split())
+        is_file_app = bool(
+            app_tokens
+            & {
+                "word",
+                "powerpoint",
+                "excel",
+                "notepad",
+                "sheets",
+                "slides",
+                "acrobat",
+                "wordpad",
+                "reader",
+                "ppt",
+                "pptx",
+                "doc",
+                "docx",
+                "xls",
+                "xlsx",
+                "pdf",
+            }
+        )
+        if is_file_app:
+            q = m_open_in.group("q").strip()
+            return Intent("open_file", text, query=q, note_text=raw_app)
+
+    # 4. Pattern: open <query> (ppt|pptx|doc|docx|xls|xlsx|pdf|txt|md)
+    m_ext = re.match(
+        r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?"
+        r"open\s+(?:the\s+|a\s+|an\s+)?(?:file|doc|document)?\s*"
+        r"(?P<q>.+?)\s+(?P<ext>pptx?|docx?|xlsx?|pdf|txt|md)\s*[.!?]*$",
+        text,
+        re.I,
+    )
+    if m_ext:
+        q = m_ext.group("q").strip()
+        ext = m_ext.group("ext").strip().lower()
+        return Intent("open_file", text, query=q, note_text=ext)
+
+    return None
+
+
+def _parse_slide_number(val: str | None) -> int | None:
+    if not val:
+        return None
+    clean = val.strip().lower()
+    if clean.isdigit():
+        return int(clean)
+    if clean in NUMBER_WORDS:
+        return NUMBER_WORDS[clean]
+    return None
+
+
+def _match_system_authority(text: str) -> Intent | None:
+    m = SYSTEM_COMMAND_RE.match(text)
+    if not m:
+        return None
+    if m.group("restart_nightmare"):
+        return Intent("system_authority", text, action="restart_nightmare")
+    if m.group("restart_pc"):
+        return Intent("system_authority", text, action="restart_pc")
+    if m.group("shutdown_pc"):
+        return Intent("system_authority", text, action="shutdown_pc")
+    if m.group("cancel_shutdown"):
+        return Intent("system_authority", text, action="cancel_shutdown")
+    return None
+
+
+def _match_ppt_open_slide(text: str) -> Intent | None:
+    m = PPT_OPEN_SLIDE_RE.match(text)
+    if not m:
+        return None
+    q = m.group("q1") or m.group("q2") or m.group("q3") or m.group("q4")
+    raw_s = m.group("s1") or m.group("s2") or m.group("s3")
+    topic = m.group("t4")
+
+    clean_q = (q or "").strip()
+    clean_q = re.sub(r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?", "", clean_q, flags=re.I)
+    clean_q = re.sub(r"^\s*(?:comments?\s+(?:and\s+)?|so\s+|well\s+|can\s+you\s+|could\s+you\s+)", "", clean_q, flags=re.I)
+    clean_q = re.sub(r"^\s*(?:find\s+and\s+open|open|find)\s+(?:the\s+|a\s+|an\s+)?", "", clean_q, flags=re.I)
+    clean_q = clean_q.strip(" .,?!")
+
+    slide_num = _parse_slide_number(raw_s) if raw_s else None
+    return Intent(
+        "ppt_open_slide",
+        text,
+        query=clean_q or text,
+        slide=slide_num,
+        note_text=topic.strip() if topic else None,
+        action="topic" if topic else ("goto" if slide_num else None),
+    )
+
+
+def _match_ppt_control(text: str) -> Intent | None:
+    m = PPT_CONTROL_RE.match(text)
+    if not m:
+        return None
+    if m.group("next"):
+        return Intent("ppt_control", text, action="next")
+    if m.group("prev"):
+        return Intent("ppt_control", text, action="previous")
+    if m.group("topic"):
+        topic = m.group("topic").strip()
+        return Intent("ppt_control", text, action="topic", query=topic)
+    raw_s = m.group("s1") or m.group("s2")
+    slide_num = _parse_slide_number(raw_s)
+    if slide_num is not None:
+        return Intent("ppt_control", text, action="goto", slide=slide_num)
+    return None
+
+
+def _match_timeline_diff(text: str) -> Intent | None:
+    t = text.strip()
+    if TIMELINE_DIFF_RE.match(t):
+        return Intent("timeline_diff", text)
+    t_clean = re.sub(r"[^a-z0-9\s]", "", t.lower()).strip()
+    if t_clean in {
+        "what change in the citizengraph timeline from the gdrive",
+        "what changed in the citizengraph timeline",
+        "compare citizengraph timeline with gdrive",
+        "check gdrive timeline updates",
+        "what did my team update in the timeline",
+        "check timeline diff",
+        "timeline diff",
+        "citizengraph timeline diff",
+        "check timeline changes",
+    }:
+        return Intent("timeline_diff", text)
+    return None
+
+
+def _match_team_progress(text: str) -> Intent | None:
+    t = text.strip()
+    if t.lower().startswith("/timeline"):
+        return Intent("team_progress", text)
+
+    m = TEAM_PROGRESS_RE.match(t)
+    if m:
+        target = (m.groupdict().get("target") or "").strip()
+        if not target:
+            # Check if team number was in the main phrase
+            m_team = re.search(r"\b(team\s*\d+|team\s+[a-z0-9_-]+)\b", t, re.I)
+            if m_team:
+                target = m_team.group(1).strip()
+        return Intent("team_progress", text, query=target)
+
+    t_clean = re.sub(r"[^a-z0-9\s]", "", t.lower()).strip()
+    if t_clean in {
+        "show team progress", "open timeline tracker", "check team 1 progress",
+        "show team 1 progress", "team progress", "timeline tracker", "open timeline",
+        "check team progress", "check progress", "open team tracker", "team tracker",
+        "citizengraph timeline", "citizengraph timeline tracker", "open citizengraph timeline",
+        "citizengraph thesis timeline",
+    }:
+        target = "team 1" if "team 1" in t_clean else ""
+        return Intent("team_progress", text, query=target)
+
+    if re.search(r"\b(check|show|view|open)\s+(?:the\s+)?(team\s*\d+)\s+progress\b", t_clean):
+        m_team = re.search(r"\b(team\s*\d+)\b", t_clean)
+        return Intent("team_progress", text, query=m_team.group(1) if m_team else "")
+    return None
+
+
+def _match_approve_email(text: str) -> Intent | None:
+    t = text.strip()
+    if APPROVE_EMAIL_RE.match(t):
+        return Intent("approve_email", text)
+    t_clean = re.sub(r"[^a-z0-9\s]", "", t.lower()).strip()
+    if t_clean in {"approve email", "send email", "send the email", "approve reminder email", "confirm email", "approve reminder"}:
+        return Intent("approve_email", text)
+    return None
+
+
 def route(
     text: str,
     settings: Settings,
@@ -406,6 +896,25 @@ def route(
     if m:
         return Intent("run_command", text, command=m.group("cmd"))
 
+    sys_cmd = _match_system_authority(text)
+    if sys_cmd is not None:
+        return sys_cmd
+
+    appr_email = _match_approve_email(text)
+    if appr_email is not None:
+        return appr_email
+
+    diff_prog = _match_timeline_diff(text)
+    if diff_prog is not None:
+        return diff_prog
+
+    team_prog = _match_team_progress(text)
+    if team_prog is not None:
+        return team_prog
+
+    if RERUN_TASK_RE.match(text):
+        return Intent("rerun_task", text)
+
     if RESET_RE.match(text):
         return Intent("reset_session", text)
     if DB_OPEN_RE.match(text):
@@ -416,6 +925,20 @@ def route(
         return Intent("settings_open", text)
     if SETTINGS_CLOSE_RE.match(text):
         return Intent("settings_close", text)
+
+    m_elevate = CLEARANCE_ELEVATE_RE.match(text)
+    if m_elevate:
+        lvl = m_elevate.group("lvl1") or m_elevate.group("lvl2") or "3"
+        return Intent("clearance_prompt", text, query=lvl)
+
+    if CLEARANCE_LOCKDOWN_RE.match(text):
+        return Intent("clearance_lockdown", text)
+
+    if CLEARANCE_STATUS_RE.match(text):
+        return Intent("clearance_status", text)
+
+    if CLEAR_CACHE_RE.match(text):
+        return Intent("clear_cache", text)
 
     m_fact = REMEMBER_RE.match(text)
     if m_fact:
@@ -451,6 +974,38 @@ def route(
         if task_id:
             return Intent("run_task", text, task_id=task_id)
 
+        m_dev = DEV_TASK_KIND_RE.search(n)
+        if m_dev:
+            raw_k = m_dev.group("kind").lower().replace(" ", "").replace("-", "")
+            if raw_k in {"tests", "test"}:
+                k = "test"
+            elif "npm" in raw_k:
+                k = "npmtest"
+            elif raw_k == "pytest":
+                k = "pytest"
+            elif raw_k == "typecheck":
+                k = "typecheck"
+            else:
+                k = raw_k
+            res = _resolve_with_followup(text, n, settings.desktop_root, last_project)
+            return Intent("run_dev_task", text, task_id=k, resolution=res)
+
+    m_voice = VOICE_SETTINGS_RE.match(text)
+    if m_voice:
+        g = (m_voice.group("g1") or m_voice.group("g2") or "").lower()
+        return Intent("voice_settings", text, voice_gender=g)
+
+    if CONVERSATION_HISTORY_RE.search(text):
+        return Intent("conversation_history", text)
+
+    m_search = SEARCH_PROJECTS_RE.match(text)
+    if m_search:
+        q = m_search.group("query").strip().strip(" .,?!")
+        return Intent("search_projects", text, query=q)
+
+    if OPEN_HELPER_RE.match(text):
+        return Intent("quick_reply", text, note_text="helper")
+
     if QUICK_TIME_RE.search(text):
         return Intent("quick_reply", text, note_text="time")
     if QUICK_HELP_RE.match(text):
@@ -474,8 +1029,32 @@ def route(
                 raw_city = raw_city[: -len(suffix)].strip()
         return Intent("weather", text, city=raw_city or settings.weather_city)
 
+    if WORKSPACE_BRIEFING_RE.search(n):
+        return Intent("workspace_briefing", text)
+
+    if WORKSPACE_CHANGES_RE.search(n):
+        return Intent("workspace_changes", text)
+
+    if WORK_PRIORITIES_RE.search(n):
+        return Intent("work_priorities", text)
+
     if CROSS_PROJECT.search(n):
         return Intent("cross_project", text)
+
+    ppt_open = _match_ppt_open_slide(text)
+    if ppt_open is not None:
+        return ppt_open
+
+    ppt_ctrl = _match_ppt_control(text)
+    if ppt_ctrl is not None:
+        return ppt_ctrl
+
+    if GITHUB_CHECK_RE.search(text):
+        return Intent("github_check", text)
+
+    file_intent = _match_open_file(text, n)
+    if file_intent is not None:
+        return file_intent
 
     is_doc = _is_doc_query(text, n)
     if is_doc:
@@ -501,7 +1080,8 @@ def route(
         if app_id:
             return Intent("open_app", text, app_id=app_id)
         if has_project and not is_progress:
-            return Intent("open_folder", text, resolution=res)
+            if not re.search(r"\b(doc|docs|document|chapter|checklist|file|pdf|sheet|slide|notes)\b", n):
+                return Intent("open_folder", text, resolution=res)
 
     if OPEN_VERB.search(n) and not registry.find_app(n):
         padded = f" {n} "
@@ -525,5 +1105,14 @@ def route(
 
     if USAGE.search(n):
         return Intent("usage", text)
+
+    # Level 2 Semantic Router (FastEmbed ONNX): matches queries that miss exact regexes
+    try:
+        from .semantic_router import match_semantic_intent
+        matched_semantic = match_semantic_intent(text)
+        if matched_semantic is not None:
+            return matched_semantic
+    except Exception:
+        pass
 
     return Intent("chat", text)

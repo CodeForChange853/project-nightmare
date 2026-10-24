@@ -1,4 +1,4 @@
-// Turning SpeechRecognition results into one transcript.
+﻿// Turning SpeechRecognition results into one transcript.
 //
 // Desktop Chrome gives consecutive pieces: ["how many", "projects do I have"].
 // Android Chrome (continuous mode) gives every growing guess as its own result:

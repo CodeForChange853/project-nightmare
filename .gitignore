@@ -2,6 +2,11 @@
 backend/.env
 backend/apps.json
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.db.bak
+*.bak
 .venv/
 __pycache__/
 .pytest_cache/
@@ -11,6 +16,3 @@ frontend/.env.local
 frontend/dist/
 backend/logs/
 backend/backups/
-*.db-wal
-*.db-shm
-*.db-journal
