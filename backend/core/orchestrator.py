@@ -1719,6 +1719,26 @@ class Orchestrator:
 
         return await self.confirm(target_pid, approve=True)
 
+    def _do_email_report(self):
+        import sqlite3
+        conn = sqlite3.connect('backend/nightmare.db')
+        cursor = conn.cursor()
+        
+        # Count unread categories
+        cursor.execute("SELECT COUNT(*) FROM email_state WHERE category='Priority' AND status='Pending'")
+        priority_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM email_state WHERE category='Temu Spam' AND status='Pending'")
+        temu_count = cursor.fetchone()[0]
+        
+        # Mark as read/reported in the local database
+        cursor.execute("UPDATE email_state SET status='Reported' WHERE status='Pending'")
+        conn.commit()
+        conn.close()
+        
+        response = f"Today you have {priority_count} priority emails waiting, and I ignored {temu_count} Temu marketing notifications."
+        return {'text': response, 'ui': 'email_report'}
+
     async def _do_usage(self, intent: Intent) -> Reply:
         c = self.audit.llm_counts()
         avg_s = f"{c['avg_ms'] / 1000:.1f}s" if c.get("avg_ms") else "n/a"

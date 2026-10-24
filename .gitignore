@@ -21,3 +21,7 @@ backend/credentials.json
 token.json
 backend/token.json
 
+# Google Workspace & Pub/Sub Credentials
+backend/credentials.json
+backend/token.json
+backend/tools/pubsub-service-account-key.json
