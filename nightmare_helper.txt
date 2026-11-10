@@ -124,6 +124,7 @@ Voice / Text Commands:
   - "count my projects"
   - "how many projects are there"
   - "list my projects"
+  - "how many project i have" / "how many projects do I have"
   - "what projects are on my desktop"
   - "show my projects"
 
@@ -270,6 +271,8 @@ Voice / Text Commands:
   - "open github.com"
   - "open chatgpt"
   - "open spotify"
+  - "open youtube music"
+  - "play lofi on youtube music"
 
 -------------------------------------------------------------------------------
 17. DATABASE & SETTINGS ACCESS (PIN REQUIRED)
@@ -300,35 +303,29 @@ Voice / Text Commands:
   - "mini"
 
 -------------------------------------------------------------------------------
-19. 3-TIER SECURITY CLEARANCE (LEVEL 1, LEVEL 3, LEVEL 5)
+19. LEVEL 5 ARCHITECT SECURITY CLEARANCE
 -------------------------------------------------------------------------------
 Purpose:
-  Controls the security clearance tier of Nightmare. Startup defaults to Level 1
-  (Observer, strictly read-only). Level 3 (Operator) unlocks memory writes, allowlisted
-  app launches, and dev tasks with a 6-digit PIN. Level 5 (Architect) unlocks raw shell
-  commands and system mutations with a secret password.
+  Project Nightmare operates with permanent Level 5 (Architect) authority for the
+  local desktop session. Multi-tier elevation (Level 1 / Level 3) and inactivity
+  decay timers have been eliminated.
 
 Voice / Text Commands:
-  - "nightmare open level 3"
-  - "elevate to level 3"
-  - "nightmare open level 5"
-  - "elevate to level 5"
   - "what is my clearance level"
-  - "nightmare lock down"
-  - "drop to level 1"
+  - "check my clearance"
 
 Notes:
-  - Level 3 decays to Level 1 after 30 minutes of inactivity.
-  - Level 5 decays to Level 1 after 10 minutes of inactivity or immediately on sleep mode.
-  - Remote Tailscale sessions are hard-capped at Level 1 Observer.
+  - Destructive system mutations (PC restart, shutdown, Nightmare restart, SMTP emails)
+    always require click confirmation (needs_confirm=True).
+  - Remote Tailscale sessions remain strictly read-only.
 
 -------------------------------------------------------------------------------
-20. LEVEL 3 SMART FILE NAVIGATOR & GITHUB INTELLIGENCE
+20. SMART FILE NAVIGATOR & GITHUB INTELLIGENCE
 -------------------------------------------------------------------------------
 Purpose:
   Safely indexes and opens safe files (.pptx, .ppt, .docx, .doc, .xlsx, .pdf, .txt, .md)
   across Desktop, Documents, and Downloads. Performs remote updates, PR, and merge
-  conflict checks across tracked GitHub repositories. Requires Level 3 Operator access.
+  conflict checks across tracked GitHub repositories.
 
 Voice / Text Commands:
   - "find file related to timeline and open it in word or powerpoint"
@@ -343,7 +340,7 @@ Voice / Text Commands:
 Notes:
   - Strictly skips .git, node_modules, .venv, AppData, and secret files (.env, password, credential, pem, key).
   - Path traversal and sensitive file access trigger a deterministic security block.
-  - Opening files is blocked on remote Tailscale sessions and requires Level 3+.
+  - Opening files is blocked on remote Tailscale sessions.
 
 -------------------------------------------------------------------------------
 21. LEVEL 5 POWERPOINT EXACT-SLIDE PRESENTER & SYSTEM AUTHORITY
@@ -368,7 +365,7 @@ Voice / Text Commands:
   - "cancel shutdown"
 
 Notes:
-  - Strictly requires Level 5 (Architect) clearance. Blocked at Level 1 and Level 3.
+  - Operates under Level 5 (Architect) clearance.
   - "rerun yourself", "restart my pc", and "shut down my pc" always require click confirmation (needs_confirm=True).
   - PowerPoint slide XML parsing operates with zero pip dependencies using built-in zipfile + xml.etree.ElementTree.
   - COM automation falls back seamlessly to PowerShell COM interop if pywin32 is not installed.
@@ -405,10 +402,106 @@ Voice / Text Commands:
   - "/timeline"
 
 Notes:
-  - Strictly requires Level 5 (Architect) clearance. Blocked at Level 1 and Level 3, and blocked on remote sessions.
+  - Operates under Level 5 (Architect) clearance; mutations are blocked on remote sessions.
   - Generates deterministic plain-Python spoken summaries of detected timeline diffs without cloud LLM overhead.
   - "what changed in the citizengraph timeline" auto-opens TeamProgressPanel focused on Tab 5 (GDRIVE DIFF & TEAM SYNC).
   - "open citizengraph timeline in excel" uses file_navigator.safe_open_file to launch the local .xlsx in Microsoft Excel.
   - TeamProgressPanel.jsx renders exclusively for high-density desktop command-center viewports with GSAP tab transitions.
   - Approving stale email reminders sends via SMTP; declining snoozes alerts for 24 hours in SQLite.
+
+-------------------------------------------------------------------------------
+23. DEVELOPER PERSONA & PORTFOLIO NAVIGATION
+-------------------------------------------------------------------------------
+Purpose:
+  Instant voice and text responses about the developer (Adrian S. Garcia), his academic
+  standing, portfolio web link, project origin story, and technical stack. Allows hands-free
+  or one-click navigation to Adrian's developer portfolio in the browser.
+
+Voice / Text Commands:
+  - "who is your developer"
+  - "who developed you"
+  - "who is adrian"
+  - "tell me about your developer"
+  - "why did adrian develop you"
+  - "why you are develop"
+  - "why were you developed"
+  - "why do you exist"
+  - "open that link"
+  - "open your developers portfolio web"
+  - "open adrian portfolio"
+  - "what are adrian's skills"
+  - "what other projects did adrian build"
+  - "what model powers you"
+
+Notes:
+  - Spoken answers execute in plain Python (<50ms, zero LLM latency).
+  - "open that link" contextually opens the most recently referenced URL or Adrian's portfolio.
+  - Interactive [Visit Portfolio] action link is displayed underneath the response in the terminal UI.
+  - Configurable in backend/.env via NIGHTMARE_DEVELOPER_PORTFOLIO_URL.
+
+-------------------------------------------------------------------------------
+24. THESIS DEFENSE CO-PILOT & HARDWARE COCKPIT TELEMETRY
+-------------------------------------------------------------------------------
+Purpose:
+  Slide-aware presentation rehearsal stopwatch, pacing nudges, and mock academic
+  panelist technical interrogation questions for CitizenGraph CS thesis defense (Phase 8F),
+  combined with instant (<20ms, zero-LLM) Windows C runtime hardware telemetry
+  monitoring CPU load %, physical RAM %, battery charge %, and top memory-consuming
+  processes (Phase 9A).
+
+Voice / Text Commands (Hardware Telemetry):
+  - "system telemetry"
+  - "hardware telemetry"
+  - "system status"
+  - "how much ram is used"
+  - "ram usage"
+  - "memory usage"
+  - "cpu load"
+  - "cpu usage"
+  - "battery status"
+  - "battery level"
+  - "battery percentage"
+  - "system battery"
+  - "what processes are running"
+  - "top processes"
+  - "system processes"
+  - "heavy processes"
+  - "/cockpit"
+  - "/telemetry"
+
+Voice / Text Commands (Thesis Defense Co-Pilot):
+  - "start defense rehearsal" (Requires Level 5 Architect)
+  - "activate defense mode" (Requires Level 5 Architect)
+  - "start mock defense" (Requires Level 5 Architect)
+  - "begin thesis rehearsal" (Requires Level 5 Architect)
+  - "ask defense question"
+  - "panelist question"
+  - "panelist interrogation"
+  - "ask me a defense question"
+  - "defense timing"
+  - "how is my defense pace"
+  - "rehearsal timing"
+  - "pacing status"
+  - "next slide" (advances slide & updates pacing stopwatch)
+  - "previous slide"
+  - "stop defense rehearsal"
+  - "end defense rehearsal"
+  - "stop defense mode"
+  - "/defense"
+  - "/rehearsal"
+
+Notes:
+  - System Telemetry queries native Windows C runtime (ctypes.windll.kernel32) with zero LLM latency (<20ms).
+  - Telemetry commands are accessible from Level 1 (Observer) and phone sessions.
+  - "start defense rehearsal" strictly requires Level 5 (Architect) clearance and hooks into PowerPoint COM automation.
+  - "ask defense question" synthesizes targeted academic interrogation questions covering CitizenGraph Specific Objectives (SO-1 to SO-7), AST validation, return-trip prevention formula M = R \ H >= 90%, 3-tier clearance security, and zero-dependency OpenXML parsing.
+  - Rehearsal telemetry is persisted to the defense_sessions SQLite table and visualized in DefensePanel.jsx.
 ===============================================================================
+MEETING CAPTIONS AND FREE VOICES (typed shortcuts)
+  /voice       Choose and preview available free browser voices; natural pitch and adjustable speed.
+  /meeting     Live Mandarin Chinese captions with queued English translations via existing agy.
+  /transcribe  Same meeting panel. Choose microphone, PC/tab audio, or both; click Start captions.
+               For PC audio use desktop Chrome 135+ and enable Share audio in the picker.
+               Browser speech services may send audio online. Translation may lag behind speech.
+               Captions never run commands. Export the transcript before closing the panel.
+               Live speech, audio capture, and voice quality remain UNVERIFIED live.

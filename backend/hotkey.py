@@ -139,6 +139,8 @@ class Helper:
         u.GetWindowTextW.argtypes = u.GetClassNameW.argtypes = [HWND, wintypes.LPWSTR, INT]
         u.GetWindowRect.argtypes = [HWND, ctypes.POINTER(wintypes.RECT)]
         u.GetDpiForWindow.argtypes = [HWND]
+        if hasattr(u, "GetDpiForSystem"):
+            u.GetDpiForSystem.restype = UINT
         self.url = f"http://127.0.0.1:{port}/?mini"
         self.hotkey = hotkey
         self.hwnd = None
@@ -167,7 +169,7 @@ class Helper:
 
         def visit(hwnd, _):
             if (self.user32.IsWindowVisible(hwnd) and self._class(hwnd) == CHROME_CLASS
-                    and self._title(hwnd) == MINI_TITLE):
+                    and self._title(hwnd) in (MINI_TITLE, FULL_TITLE)):
                 found.append(hwnd)
                 return False
             return True
@@ -183,9 +185,17 @@ class Helper:
 
     def _scale(self) -> float:
         try:
-            return self.user32.GetDpiForWindow(self.hwnd) / 96 or 1.0
+            if self.hwnd and self.user32.IsWindow(self.hwnd):
+                dpi = self.user32.GetDpiForWindow(self.hwnd)
+                if dpi:
+                    return dpi / 96.0
+            if hasattr(self.user32, "GetDpiForSystem"):
+                dpi = self.user32.GetDpiForSystem()
+                if dpi:
+                    return dpi / 96.0
         except (AttributeError, OSError):
-            return 1.0
+            pass
+        return 1.0
 
     def _work_area(self):
         rect = self.wintypes.RECT()
@@ -197,7 +207,11 @@ class Helper:
             return
         rect = self.wintypes.RECT()
         if self.user32.GetWindowRect(self.hwnd, self.ctypes.byref(rect)):
-            self.saved_rect = (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
+            wl, wt, wr, wb = self._work_area()
+            w = rect.right - rect.left
+            h = rect.bottom - rect.top
+            if rect.left >= wl - 50 and rect.top >= wt - 50 and rect.left < wr and rect.top < wb:
+                self.saved_rect = (rect.left, rect.top, w, h)
 
     def _focus(self):
         self.user32.SetForegroundWindow(self.hwnd)
@@ -206,7 +220,13 @@ class Helper:
     def show_mini(self, focus=True):
         if self.user32.IsIconic(self.hwnd) or self.user32.IsZoomed(self.hwnd):
             self.user32.ShowWindow(self.hwnd, self.SW_RESTORE)
-        x, y, w, h = self.saved_rect or mini_rect(self._work_area(), self._scale())
+        wl, wt, wr, wb = self._work_area()
+        scale = self._scale()
+        rect = self.saved_rect or mini_rect((wl, wt, wr, wb), scale)
+        x, y, w, h = rect
+        if x + 50 > wr or y + 50 > wb or x < wl - 50 or y < wt - 50:
+            x, y, w, h = mini_rect((wl, wt, wr, wb), scale)
+            self.saved_rect = (x, y, w, h)
         self.user32.SetWindowPos(self.hwnd, self.HWND_TOPMOST, x, y, w, h, self.SWP_SHOWWINDOW)
         if focus:
             self._focus()
@@ -229,10 +249,22 @@ class Helper:
             log.error("Chrome was not found (App Paths)")
             self._message("Google Chrome was not found, so the Nightmare window can't open.")
             return
-        x, y, w, h = mini_rect(self._work_area(), 1.0)
-        subprocess.Popen([chrome, f"--app={self.url}", f"--window-size={MINI_W},{MINI_H}", f"--window-position={x},{y}"],
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         close_fds=True)
+        scale = self._scale()
+        wl, wt, wr, wb = self._work_area()
+        dip_work_area = (int(wl / scale), int(wt / scale), int(wr / scale), int(wb / scale))
+        x, y, w, h = mini_rect(dip_work_area, 1.0)
+        data_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "ProjectNightmare", "chrome_profile")
+        subprocess.Popen([
+            chrome,
+            f"--user-data-dir={data_dir}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            f"--app={self.url}",
+            f"--window-size={MINI_W},{MINI_H}",
+            f"--window-position={x},{y}",
+        ],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        close_fds=True)
         self.launch_until = time.monotonic() + LAUNCH_WAIT
         log.info("launched %s", self.url)
 

@@ -26,7 +26,7 @@ SAFE_EXTENSIONS = {".pptx", ".ppt", ".docx", ".doc", ".xlsx", ".pdf", ".txt", ".
 FORBIDDEN_DIR_NAMES = {
     ".git", "node_modules", ".venv", "venv", "env", "appdata", "application data",
     "local settings", "cookies", "nethood", "printhood", "recent", "sendto",
-    "start menu", "templates", "__pycache__", "dist", "build", "$recycle.bin",
+    "start menu", "templates", "__pycache__", "dist", "build", "$recycle.bin", "data",
 }
 
 BLOCKED_FILE_RE = re.compile(
@@ -200,11 +200,13 @@ def scan_safe_files(roots: list[Path]) -> list[tuple[str, str, str, str, int]]:
             # In-place filtering of subdirectories
             dirnames[:] = [
                 d for d in dirnames
-                if not d.startswith(".") and d.lower() not in FORBIDDEN_DIR_NAMES
+                if not d.startswith(".")
+                and d.lower() not in FORBIDDEN_DIR_NAMES
+                and not d.lower().endswith(".db")
             ]
 
             for fname in filenames:
-                if fname.startswith(".") or fname.startswith("~$") or BLOCKED_FILE_RE.search(fname):
+                if fname.startswith(".") or fname.startswith("~$") or fname.lower().endswith(".db") or BLOCKED_FILE_RE.search(fname):
                     continue
                 ext = Path(fname).suffix.lower()
                 if ext not in SAFE_EXTENSIONS:
@@ -240,6 +242,33 @@ def index_files(roots: list[Path] | None = None, audit: Audit | None = None) -> 
     return len(records)
 
 
+def _char_trigrams(s: str) -> set[str]:
+    """Extracts character 3-grams for trigram similarity matching."""
+    clean = re.sub(r"[^a-z0-9]", "", s.lower())
+    if len(clean) < 3:
+        return {clean} if clean else set()
+    return {clean[i:i+3] for i in range(len(clean) - 2)}
+
+
+def _trigram_similarity(s1: str, s2: str) -> float:
+    """Computes character trigram similarity coefficient (Dice coefficient)."""
+    t1 = _char_trigrams(s1)
+    t2 = _char_trigrams(s2)
+    if not t1 or not t2:
+        return 0.0
+    inter = len(t1 & t2)
+    return 2.0 * inter / (len(t1) + len(t2))
+
+
+def _normalize_phonetic_stt(text: str) -> str:
+    """Normalizes common Web Speech transcriptions to canonical spelling."""
+    s = text.lower()
+    s = re.sub(r"\bl\s+filibuster\s+esmo\b", "el filibusterismo", s)
+    s = re.sub(r"\bfilibuster\s+esmo\b", "filibusterismo", s)
+    s = re.sub(r"\belfilibusterismo\b", "el filibusterismo", s)
+    return s
+
+
 def parse_file_query(query: str) -> tuple[str, set[str]]:
     """Extracts target search keywords and extension filter hints from spoken user input."""
     q = query.lower()
@@ -250,14 +279,17 @@ def parse_file_query(query: str) -> tuple[str, set[str]]:
         if re.search(rf"\b{re.escape(keyword)}\b", q):
             inferred_exts.update(exts)
 
-    # Clean query of common conversational lead-ins, speech recognition noise, and verbs
-    clean = query
+    # Phonetic STT normalization
+    clean = _normalize_phonetic_stt(query)
     # Strip parenthesized app hints, e.g. "LCRO Interview checklist.docx (word)"
     clean = re.sub(r"\s*\(\s*(?:word|powerpoint|excel|notepad|sheets|slides|acrobat|wordpad|doc|docx|ppt|pptx|xls|xlsx|pdf)\s*\)\s*$", "", clean, flags=re.I)
     clean = re.sub(r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?", "", clean, flags=re.I)
+    clean = re.sub(r"^\s*(?:i\s+said|said)\s+", "", clean, flags=re.I)
     clean = re.sub(r"^\s*(?:comments?\s+(?:and\s+)?|so\s+|well\s+|can\s+you\s+|could\s+you\s+)", "", clean, flags=re.I)
+    clean = re.sub(r"^\s*(?:list\s+(?:all\s+)?(?:the\s+)?|do\s+i\s+have\s+any\s+|what\s+about\s+(?:the\s+)?)(?:files?|documents?|docs?)(?:\s+related\s+to|\s+about)?\s*", "", clean, flags=re.I)
     clean = re.sub(r"^\s*(?:find|search\s+for|look\s+up|locate)\s+(?:the\s+|a\s+|an\s+)?(?:file|document|presentation|spreadsheet|docs?|doc)?(?:\s+related\s+to|\s+about)?\s*", "", clean, flags=re.I)
     clean = re.sub(r"^\s*(?:open\s*file|open|launch)\s+(?:the\s+|a\s+|an\s+)?(?:file|document|docs?|doc)?(?:\s+related\s+to|\s+about)?\s*", "", clean, flags=re.I)
+    clean = re.sub(r"^\s*(?:create\s+(?:a\s+|an\s+)?)(?P<cr_file>.+?)\s+(?:in|on|with|using)\s+(?:word|powerpoint|excel)\s*$", r"\g<cr_file>", clean, flags=re.I)
     clean = re.sub(r"\s*(?:\b(?:and|then)\s+)?(?:open\s*file|open|launch)\s+(?:it\s+)?(?:(?:in|on|with|using)\s+[a-z\s]+)?\s*$", "", clean, flags=re.I)
     clean = re.sub(r"\s*(?:\b(?:in|on|using|with)\s+)?(?:word|powerpoint|excel|notepad|sheets|slides|acrobat|wordpad|doc|docx|ppt|pptx|xls|xlsx|pdf)\s*$", "", clean, flags=re.I)
     clean = re.sub(r"\s+\b(?:and|then|or|also)\s*$", "", clean, flags=re.I)
@@ -269,6 +301,7 @@ def parse_file_query(query: str) -> tuple[str, set[str]]:
         clean = " ".join(tokens)
 
     return clean, inferred_exts
+
 
 
 def _token_match(q_tok: str, stem_tok: str) -> bool:
@@ -292,6 +325,7 @@ def find_files(
     audit: Audit | None = None,
     db_path: Path | None = None,
     allowed_roots: list[Path] | None = None,
+    limit: int | None = None,
 ) -> list[FileMatch]:
     """Finds matching indexed files using deterministic token + fuzzy score matching."""
     global _last_index_time
@@ -300,16 +334,18 @@ def find_files(
     effective_exts: set[str] = set()
     if ext_filter:
         if isinstance(ext_filter, str):
-            if ext_filter in APP_EXT_MAP:
-                effective_exts.update(APP_EXT_MAP[ext_filter])
+            low = ext_filter.lower()
+            if low in APP_EXT_MAP:
+                effective_exts.update(APP_EXT_MAP[low])
             else:
-                effective_exts.add(ext_filter.lower() if ext_filter.startswith(".") else f".{ext_filter.lower()}")
+                effective_exts.add(low if low.startswith(".") else f".{low}")
         else:
             for item in ext_filter:
-                if item in APP_EXT_MAP:
-                    effective_exts.update(APP_EXT_MAP[item])
+                low = item.lower()
+                if low in APP_EXT_MAP:
+                    effective_exts.update(APP_EXT_MAP[low])
                 else:
-                    effective_exts.add(item.lower() if item.startswith(".") else f".{item.lower()}")
+                    effective_exts.add(low if low.startswith(".") else f".{low}")
     elif query_exts:
         effective_exts.update(query_exts)
 
@@ -357,34 +393,38 @@ def find_files(
                 stem_tokens = [w for w in re.split(r"[^a-z0-9]+", stem) if len(w) >= 2]
                 matched_count = sum(1 for q_tok in q_tokens if any(_token_match(q_tok, s_tok) for s_tok in stem_tokens))
                 matched_tokens = matched_count
+
+                tri_sim = _trigram_similarity(clean_stem_lower, stem)
+                diff_sim = SequenceMatcher(
+                    None,
+                    re.sub(r"[^a-z0-9]", "", clean_stem_lower),
+                    re.sub(r"[^a-z0-9]", "", stem),
+                ).ratio()
+
                 if total_q_tokens > 1:
                     ratio = matched_count / total_q_tokens
+                    coverage = total_q_tokens / max(len(stem_tokens), total_q_tokens)
                     if ratio == 1.0:
-                        coverage = total_q_tokens / max(len(stem_tokens), total_q_tokens)
-                        score = 0.88 + (coverage * 0.10)
+                        score = 0.85 + (coverage * 0.10) + (tri_sim * 0.05)
                     elif ratio >= 0.5:
-                        # Partial match: query had multiple distinctive keywords, candidate only matched some
-                        score = 0.40 + (ratio * 0.15)
+                        score = 0.45 + (ratio * 0.20) + (max(tri_sim, diff_sim) * 0.25) + (coverage * 0.10)
                     elif any(tok in stem for tok in q_tokens):
-                        score = 0.35
+                        score = 0.35 + (max(tri_sim, diff_sim) * 0.30)
                     else:
-                        fuzzy = SequenceMatcher(None, clean_stem_lower, stem).ratio()
-                        if fuzzy >= 0.7:
-                            score = fuzzy * 0.60
+                        score = max(tri_sim, diff_sim) * 0.85
                 elif total_q_tokens == 1:
                     if matched_count == 1:
                         coverage = 1.0 / max(len(stem_tokens), 1)
-                        score = 0.75 + (coverage * 0.15)
+                        score = 0.75 + (coverage * 0.15) + (tri_sim * 0.10)
                     elif any(tok in stem for tok in q_tokens):
-                        score = 0.60
+                        score = 0.60 + (max(tri_sim, diff_sim) * 0.20)
                     else:
-                        fuzzy = SequenceMatcher(None, clean_stem_lower, stem).ratio()
-                        if fuzzy >= 0.6:
-                            score = fuzzy * 0.85
+                        score = max(tri_sim, diff_sim) * 0.85
                 else:
-                    fuzzy = SequenceMatcher(None, clean_stem_lower, stem).ratio()
-                    if fuzzy >= 0.6:
-                        score = fuzzy * 0.85
+                    score = max(tri_sim, diff_sim) * 0.85
+
+                if max(tri_sim, diff_sim) >= 0.70 and score < 0.80:
+                    score = max(score, max(tri_sim, diff_sim) * 0.90)
 
             if score >= 0.5:
                 res.append(
@@ -416,7 +456,7 @@ def find_files(
             refreshed = audit.get_indexed_files(effective_exts if effective_exts else None)
             matches = _score_items(refreshed)
 
-    return matches
+    return matches[:limit] if limit is not None else matches
 
 
 def safe_open_file(

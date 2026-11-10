@@ -5,13 +5,18 @@ from this module; detected dev tasks become ActionPlans that always wait for a c
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import json
+import logging
 from pathlib import Path
 import re
 import shutil
 import subprocess
+import threading
 import time
+
+logger = logging.getLogger("nightmare.workspace")
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 TODO_RE = r"\b(TODO|FIXME)\b"
@@ -475,6 +480,17 @@ def check_repo_conflicts(project: Path, timeout: int = 8) -> list[str]:
     return conflicts
 
 
+def check_repo_full(project: Path) -> dict:
+    """Runs all checks for a single repository."""
+    return {
+        "project": project.name,
+        "path": project,
+        "remote": check_repo_remote(project),
+        "pull_requests": check_repo_pull_requests(project),
+        "conflicts": check_repo_conflicts(project),
+    }
+
+
 def check_github_repos(desktop_root: Path) -> list[dict]:
     """Runs GitHub status, remote, PR, and conflict checks across tracked Desktop repos."""
     from .fs_reader import list_projects
@@ -483,19 +499,29 @@ def check_github_repos(desktop_root: Path) -> list[dict]:
     for p in projects:
         if not (p / ".git").exists():
             continue
-        results.append({
-            "project": p.name,
-            "path": p,
-            "remote": check_repo_remote(p),
-            "pull_requests": check_repo_pull_requests(p),
-            "conflicts": check_repo_conflicts(p),
-        })
+        results.append(check_repo_full(p))
     return results
 
 
-def github_workspace_summary(desktop_root: Path) -> str:
-    """Concise spoken briefing of remote updates, open PRs, and merge conflicts across repos."""
-    repos = check_github_repos(desktop_root)
+async def check_repo_async(project: Path) -> dict:
+    """Asynchronously runs checks for a single repository in a worker thread."""
+    return await asyncio.to_thread(check_repo_full, project)
+
+
+async def check_github_repos_async(desktop_root: Path) -> list[dict]:
+    """Runs GitHub status, remote, PR, and conflict checks concurrently via asyncio.gather."""
+    from .fs_reader import list_projects
+    projects = await asyncio.to_thread(list_projects, desktop_root)
+    git_projects = [p for p in projects if (p / ".git").exists()]
+    if not git_projects:
+        return []
+    tasks = [check_repo_async(p) for p in git_projects]
+    results = await asyncio.gather(*tasks)
+    return list(results)
+
+
+def format_github_summary(repos: list[dict]) -> str:
+    """Formats raw repository check dicts into a crisp spoken summary."""
     if not repos:
         return "No git repositories found on your Desktop."
 
@@ -529,3 +555,80 @@ def github_workspace_summary(desktop_root: Path) -> str:
 
     summary_text = f"Checked {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'}. " + ". ".join(repo_summaries) + "."
     return summary_text
+
+
+GITHUB_CACHE_TTL_SEC = 600  # 10 minutes
+_github_cache: dict[str, dict] = {}
+_github_cache_lock = threading.Lock()
+
+
+def _format_cache_age(age_sec: float) -> str:
+    if age_sec < 60:
+        return "just now"
+    if age_sec < 3600:
+        return f"{int(age_sec // 60)}m ago"
+    return f"{int(age_sec // 3600)}h ago"
+
+
+def github_workspace_summary(desktop_root: Path, force_refresh: bool = False) -> str:
+    """Concise spoken briefing of remote updates, open PRs, and merge conflicts across repos.
+
+    Served from warm in-memory cache in <50ms with cache age noted.
+    """
+    key = str(Path(desktop_root).resolve())
+    now = time.monotonic()
+
+    with _github_cache_lock:
+        entry = _github_cache.get(key)
+        if not force_refresh and entry and (now - entry["timestamp"] < GITHUB_CACHE_TTL_SEC):
+            age_str = _format_cache_age(now - entry["timestamp"])
+            return f"{entry['summary']} (Checked {age_str})"
+
+    # Cold start or explicit refresh requested
+    repos = check_github_repos(desktop_root)
+    summary = format_github_summary(repos)
+    with _github_cache_lock:
+        _github_cache[key] = {
+            "timestamp": time.monotonic(),
+            "summary": summary,
+            "repos": repos,
+        }
+    return f"{summary} (Checked just now)"
+
+
+async def async_github_workspace_summary(desktop_root: Path, force_refresh: bool = False) -> str:
+    """Concurrent async version serving warm cache in <50ms or revalidating via asyncio.gather."""
+    key = str(Path(desktop_root).resolve())
+    now = time.monotonic()
+
+    with _github_cache_lock:
+        entry = _github_cache.get(key)
+        if not force_refresh and entry and (now - entry["timestamp"] < GITHUB_CACHE_TTL_SEC):
+            age_str = _format_cache_age(now - entry["timestamp"])
+            return f"{entry['summary']} (Checked {age_str})"
+
+    repos = await check_github_repos_async(desktop_root)
+    summary = format_github_summary(repos)
+    with _github_cache_lock:
+        _github_cache[key] = {
+            "timestamp": time.monotonic(),
+            "summary": summary,
+            "repos": repos,
+        }
+    return f"{summary} (Checked just now)"
+
+
+async def run_github_cache_refresher(desktop_root: Path, interval_sec: int = 600) -> None:
+    """Background worker periodically refreshing GitHub repository check cache every 10 minutes."""
+    while True:
+        try:
+            await async_github_workspace_summary(desktop_root, force_refresh=True)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.debug("Background GitHub cache refresher error: %s", exc)
+
+        try:
+            await asyncio.sleep(interval_sec)
+        except asyncio.CancelledError:
+            break

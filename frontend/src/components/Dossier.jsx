@@ -100,7 +100,7 @@ function Stat({ icon, value, label, tone = 'text-bone' }) {
 }
 
 /** One project / reminder / app as a card with its facts and action buttons (also the phone's project page). */
-export function Selected({ item, readonly, disabled, onRun, clearanceLevel = 1 }) {
+export function Selected({ item, readonly, disabled, onRun }) {
   const ref = useRef(null)
   useLayoutEffect(() => {
     if (reducedMotion()) return
@@ -143,35 +143,22 @@ export function Selected({ item, readonly, disabled, onRun, clearanceLevel = 1 }
       {blocked && <p className="mt-3 text-[12px] text-bile">Opening and running things is turned off in read-only sessions.</p>}
       {actions.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-2">
-          {actions.map((a, i) => {
-            const needsL3 = clearanceLevel < 3 && a.full
-            return (
-              <button
-                key={a.label}
-                type="button"
-                disabled={disabled}
-                onClick={() => onRun(a.command)}
-                title={needsL3 ? 'Requires Level 3 (Operator) to execute' : undefined}
-                className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] transition-all disabled:opacity-40 ${
-                  i === 0
-                    ? clearanceLevel === 5
-                      ? 'bg-gradient-to-r from-[#ffd166] via-amber-400 to-crimson font-bold text-black shadow-[0_8px_24px_-10px_rgba(255,209,102,0.7)] hover:brightness-110'
-                      : clearanceLevel === 3
-                        ? 'bg-gradient-to-r from-amber-400 to-[#b5142a] font-semibold text-black shadow-[0_8px_24px_-10px_rgba(232,163,61,0.7)] hover:brightness-110'
-                        : 'bg-gradient-to-b from-crimson to-[#9e0d2b] font-semibold text-white shadow-[0_8px_24px_-10px_rgba(220,20,60,0.9)] hover:brightness-110'
-                    : 'border border-scar/70 text-ash hover:border-ember/60 hover:text-bone'
-                }`}
-              >
-                <span>{a.label}</span>
-                {needsL3 && (
-                  <span className="rounded bg-amber-500/25 px-1 py-0.5 font-mono text-[9px] font-bold text-amber-300">
-                    L3
-                  </span>
-                )}
-                {i === 0 && <Icon name="chevron" size={14} />}
-              </button>
-            )
-          })}
+          {actions.map((a, i) => (
+            <button
+              key={a.label}
+              type="button"
+              disabled={disabled}
+              onClick={() => onRun(a.command)}
+              className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] transition-all disabled:opacity-40 ${
+                i === 0
+                  ? 'bg-gradient-to-r from-[#ffd166] via-amber-400 to-crimson font-bold text-black shadow-[0_8px_24px_-10px_rgba(255,209,102,0.7)] hover:brightness-110'
+                  : 'border border-scar/70 text-ash hover:border-ember/60 hover:text-bone'
+              }`}
+            >
+              <span>{a.label}</span>
+              {i === 0 && <Icon name="chevron" size={14} />}
+            </button>
+          ))}
         </div>
       )}
     </section>
@@ -179,7 +166,6 @@ export function Selected({ item, readonly, disabled, onRun, clearanceLevel = 1 }
 }
 
 export default function Dossier({ item, status, offline, history, readonly, disabled, onRun, onRetry }) {
-  const clearanceLevel = status?.clearance_level ?? 1
   const calls = status?.llm_calls
   return (
     <div className="flex flex-col gap-3">
@@ -205,7 +191,6 @@ export default function Dossier({ item, status, offline, history, readonly, disa
           readonly={readonly}
           disabled={disabled}
           onRun={onRun}
-          clearanceLevel={clearanceLevel}
         />
       ) : (
         <section className="rounded-2xl border border-dashed border-scar/50 p-4">

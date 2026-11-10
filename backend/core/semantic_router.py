@@ -26,10 +26,70 @@ CANONICAL_INTENTS: dict[str, list[str]] = {
     "quick_reply:greet": [
         "hello nightmare", "hey nightmare", "are you there", "nightmare", "mic check", "testing mic",
         "wake up", "wakeup", "wake up nightmare", "nightmare wake up", "wake up please",
+        "you are getting smart nightmare", "you are getting smart",
     ],
     "quick_reply:model_identity": [
         "what model powers you", "what model are you", "who powers you", "what model is powering you",
-        "who trained you", "who built you", "what model is running you", "are you chatgpt", "are you gemini",
+        "who trained you", "what model is running you", "are you chatgpt", "are you gemini",
+        "i am trained by my developer", "i am not powered by any model",
+        "i am trained by my developer to be fully aware with its everyday setup",
+        "you don't need to include this Google AI Pro quota",
+    ],
+    "developer_info": [
+        "who is your developer", "who is the developer", "who developed you",
+        "tell me about your developer", "who is adrian", "who is adrian garcia",
+        "who created you", "who made you", "who programmed you", "who built you",
+        "who is adrian girlfriend", "who is adrian ex girlfriend",
+    ],
+    "developer_why": [
+        "why did adrian develop you", "why you are develop", "why were you developed",
+        "why did adrian build you", "why did adrian make you", "why did adrian create you",
+        "why are you developed", "why were you created", "why do you exist", "what is your purpose",
+    ],
+    "open_portfolio": [
+        "open that link", "open the link", "open your developers portfolio web",
+        "open your developer's portfolio", "open adrian portfolio", "open developer portfolio",
+        "open the portfolio", "visit your developers portfolio", "open that website",
+        "how many have visited my portfolio today", "how many have visited my portfolio",
+    ],
+    "developer_skills": [
+        "what are adrian's skills", "what are your developer's skills", "what is adrian's tech stack",
+        "what tech stack does adrian use", "what does adrian specialize in",
+    ],
+    "developer_projects": [
+        "what other projects did adrian build", "what did adrian create", "what projects did your developer make",
+        "what projects did adrian build",
+    ],
+    "system_telemetry": [
+        "how is my laptop running", "laptop hardware status", "pc hardware health",
+        "check hardware telemetry", "hardware telemetry", "check my hardware", "how is my pc running",
+        "how much ram is used", "how much memory is used", "cpu load",
+    ],
+    "system_battery": [
+        "check battery", "battery status", "how is my battery", "is ac plugged in",
+        "check battery and thermals", "battery percentage", "battery level",
+    ],
+    "system_processes": [
+        "what is using my memory", "which app is eating ram", "top processes",
+        "heavy processes", "list heavy processes", "what is eating my ram",
+        "what processes are running", "which processes are running",
+    ],
+    "defense_start": [
+        "start defense rehearsal", "activate defense mode", "start mock defense",
+        "start thesis rehearsal", "begin defense practice", "thesis defense mode",
+    ],
+    "defense_stop": [
+        "stop defense rehearsal", "stop defense mode", "end defense rehearsal",
+        "finish rehearsal", "exit defense mode",
+    ],
+    "defense_question": [
+        "ask defense question", "panelist question", "ask panelist question",
+        "panelist interrogation", "challenge me on this slide", "ask a question about this slide",
+        "mock panelist question",
+    ],
+    "defense_status": [
+        "defense timing", "how is my defense pace", "rehearsal pace", "defense pace",
+        "check defense timing", "how is my rehearsal time",
     ],
     "quick_reply:help": [
         "what can you do", "help", "what is your capability", "what are your capabilities",
@@ -64,6 +124,7 @@ CANONICAL_INTENTS: dict[str, list[str]] = {
         "what are my reminders", "reminder for today", "do i have a reminder for today", "notes right now",
         "show my reminders", "list my notes", "any reminders today", "tell me my notes",
         "minors for today do i have a reminder for today",
+        "give me some quote of the day", "give me some qoute of the day", "what are we going to do today", "quote of the day",
     ],
     "list_projects": [
         "list my projects", "what projects are on my desktop", "show my projects", "projects on desktop",
@@ -222,6 +283,19 @@ CANONICAL_INTENTS: dict[str, list[str]] = {
         "approve email", "send the reminder email", "approve team reminder",
         "approve the email draft", "confirm and send email",
     ],
+    "email_report": [
+        "check my priority emails", "read my inbox", "do i have any new emails",
+        "check priority emails", "read inbox", "check the inbox",
+        "do i have any emails", "email report", "check priority inbox",
+    ],
+    "calendar_query": [
+        "what are in my calendar", "what is in my calendar", "what is on my calendar", "check my calendar",
+        "do i have any meetings this week", "any meetings this week", "show my calendar events",
+    ],
+    "measurable_task": [
+        "have any task", "do i have any tasks", "what are my tasks", "list my tasks", "check my tasks",
+        "open task", "list measurable tasks",
+    ],
 }
 
 
@@ -255,6 +329,22 @@ class SemanticRouter:
                     self._exemplar_texts.append(p)
                     self._exemplar_intents.append(intent_key)
 
+            # Load persistent custom exemplars from SQLite if table exists
+            try:
+                import sqlite3
+                from pathlib import Path
+                db_p = Path(__file__).resolve().parent.parent / "nightmare.db"
+                if db_p.is_file():
+                    with sqlite3.connect(db_p) as conn:
+                        tbl = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='custom_exemplars'").fetchone()
+                        if tbl:
+                            for i_row, p_row in conn.execute("SELECT intent, phrase FROM custom_exemplars").fetchall():
+                                if p_row and i_row:
+                                    self._exemplar_texts.append(p_row)
+                                    self._exemplar_intents.append(i_row)
+            except Exception as exc:
+                logger.debug("Failed loading custom exemplars: %s", exc)
+
             embs = np.array(list(self._model.embed(self._exemplar_texts)))
             norms = np.linalg.norm(embs, axis=1, keepdims=True)
             self._embs_norm = embs / np.maximum(norms, 1e-9)
@@ -263,6 +353,28 @@ class SemanticRouter:
             logger.warning("Could not initialize semantic router: %s", exc)
             self._model = None
             return False
+
+    def add_custom_exemplar(self, intent: str, phrase: str) -> bool:
+        """Dynamically adds an approved exemplar and updates normalized embeddings in-memory."""
+        if not self._ensure_initialized() or self._model is None:
+            return False
+        try:
+            import numpy as np
+            clean = phrase.strip()
+            new_emb = np.array(list(self._model.embed([clean])))[0]
+            norm = np.linalg.norm(new_emb)
+            if norm > 0:
+                new_emb_norm = new_emb / norm
+                self._exemplar_texts.append(clean)
+                self._exemplar_intents.append(intent)
+                if self._embs_norm is not None:
+                    self._embs_norm = np.vstack([self._embs_norm, new_emb_norm])
+                else:
+                    self._embs_norm = np.array([new_emb_norm])
+                return True
+        except Exception as exc:
+            logger.warning("Failed adding custom exemplar: %s", exc)
+        return False
 
     def warmup(self) -> bool:
         """Pre-loads the ONNX model and computes exemplar embeddings."""
@@ -300,6 +412,32 @@ class SemanticRouter:
             logger.debug("Semantic matching failed: %s", exc)
             return None
 
+    def find_top_candidates(self, text: str, top_k: int = 2) -> list[tuple[str, float]]:
+        """Returns top_k (intent_name, similarity_score) sorted descending by score."""
+        clean = " ".join(text.strip().split())
+        if not clean:
+            return []
+        if not self._ensure_initialized() or self._model is None or self._embs_norm is None:
+            return []
+        try:
+            import numpy as np
+            q_emb = np.array(list(self._model.embed([clean])))[0]
+            norm = np.linalg.norm(q_emb)
+            if norm == 0:
+                return []
+            q_emb_norm = q_emb / norm
+            sims = np.dot(self._embs_norm, q_emb_norm)
+            intent_scores: dict[str, float] = {}
+            for intent, score in zip(self._exemplar_intents, sims):
+                score_val = float(score)
+                if intent not in intent_scores or score_val > intent_scores[intent]:
+                    intent_scores[intent] = score_val
+            sorted_intents = sorted(intent_scores.items(), key=lambda kv: -kv[1])
+            return sorted_intents[:top_k]
+        except Exception as exc:
+            logger.debug("Finding top candidates failed: %s", exc)
+            return []
+
 
 # Global singleton instance
 _router_instance: SemanticRouter | None = None
@@ -317,74 +455,201 @@ def warmup_semantic_router() -> bool:
     return get_semantic_router().warmup()
 
 
+def find_top_candidates(text: str, top_k: int = 2) -> list[tuple[str, float]]:
+    """Returns top_k (intent_name, score) candidates using semantic similarity."""
+    return get_semantic_router().find_top_candidates(text, top_k=top_k)
+
+
+def embed_text(text: str):
+    """Computes a normalized 1D float32 embedding vector for text using the loaded FastEmbed model."""
+    router = get_semantic_router()
+    if not router._ensure_initialized() or router._model is None:
+        return None
+    try:
+        import numpy as np
+        emb = np.array(list(router._model.embed([text.strip()])))[0].astype(np.float32)
+        norm = float(np.linalg.norm(emb))
+        if norm > 0:
+            return (emb / norm).astype(np.float32)
+        return emb
+    except Exception as exc:
+        logger.debug("Failed computing embedding: %s", exc)
+        return None
+
+
+def embed_texts(texts: list[str]):
+    """Computes normalized 1D float32 embedding vectors for multiple texts in a batch."""
+    router = get_semantic_router()
+    if not router._ensure_initialized() or router._model is None:
+        return None
+    try:
+        import numpy as np
+        clean_texts = [t.strip() for t in texts]
+        embs = np.array(list(router._model.embed(clean_texts))).astype(np.float32)
+        norms = np.linalg.norm(embs, axis=1, keepdims=True)
+        return [e.astype(np.float32) for e in (embs / np.maximum(norms, 1e-9))]
+    except Exception as exc:
+        logger.debug("Failed computing batch embeddings: %s", exc)
+        return None
+
+
+INTENT_FRIENDLY_NAMES: dict[str, str] = {
+    "quick_reply:name": "asking my name",
+    "quick_reply:greet": "greeting Nightmare",
+    "quick_reply:model_identity": "asking what model powers me",
+    "quick_reply:help": "asking for help and capabilities",
+    "quick_reply:helper": "opening developer helper function",
+    "quick_reply:time": "asking for the time or date",
+    "quick_reply:thanks": "saying thank you",
+    "quick_reply:sleep": "putting Nightmare to sleep",
+    "developer_info": "asking about developer Adrian Garcia",
+    "developer_why": "asking why Adrian developed Nightmare",
+    "developer_skills": "asking about Adrian's technical skills",
+    "developer_projects": "asking about Adrian's projects",
+    "open_portfolio": "opening Adrian's developer portfolio",
+    "system_telemetry": "checking system hardware telemetry",
+    "system_battery": "checking battery and power status",
+    "system_processes": "checking running system processes",
+    "defense_start": "starting thesis defense rehearsal",
+    "defense_stop": "stopping defense rehearsal",
+    "defense_question": "asking a thesis defense mock question",
+    "defense_status": "checking thesis defense pacing",
+    "weather": "checking the weather forecast",
+    "list_facts": "checking memories",
+    "list_notes": "checking your notes and reminders",
+    "list_projects": "listing your Desktop projects",
+    "conversation_history": "recapping earlier conversation",
+    "cross_project": "summarizing all Desktop projects",
+    "workspace_briefing": "getting your workspace daily briefing",
+    "workspace_changes": "checking recent workspace changes",
+    "work_priorities": "checking your project work priorities",
+    "rerun_task": "rerunning the last dev task",
+    "db_open": "opening database records",
+    "db_close": "closing database access",
+    "settings_open": "opening Nightmare settings",
+    "settings_close": "closing settings",
+    "reset_session": "starting a fresh session",
+    "usage": "checking AI quota usage",
+    "clearance_lockdown": "locking down clearance to Level 1",
+    "clearance_status": "checking current clearance level",
+    "clear_cache": "clearing cached summaries",
+    "open_file": "finding or opening a file",
+    "github_check": "checking GitHub repositories",
+    "progress": "checking project progress",
+    "team_progress": "checking CitizenGraph team timeline",
+    "timeline_diff": "checking timeline updates from GDrive",
+    "open_team_excel": "opening CitizenGraph timeline in Excel",
+    "approve_email": "approving the team reminder email",
+    "email_report": "checking your priority emails",
+    "calendar_query": "checking your calendar schedule",
+    "measurable_task": "checking measurable tasks",
+}
+
+
+def friendly_intent_name(key: str) -> str:
+    if key.startswith("clearance_elevate:"):
+        lvl = key.split(":", 1)[1]
+        return f"elevating clearance to Level {lvl}"
+    if key.startswith("voice_settings:"):
+        gender = key.split(":", 1)[1]
+        return f"switching voice to {gender}"
+    if key.startswith("system_authority:"):
+        act = key.split(":", 1)[1]
+        return f"performing system {act}"
+    return INTENT_FRIENDLY_NAMES.get(key, key.replace("_", " "))
+
+
 def match_semantic_intent(text: str, threshold: float = 0.82) -> "Intent | None":
-    """Maps freeform text to an Intent if semantic similarity >= threshold, else None."""
+    """Maps freeform text to an Intent if semantic similarity >= threshold or returns clarification if ambiguous."""
+    import re
+    if re.search(r"\b(joke|jokes|pun|puns|funny|humor|story|poem)\b", text, re.I):
+        return None
+
     from .router import Intent
 
     router = get_semantic_router()
+    candidates = router.find_top_candidates(text, top_k=2)
+    if not candidates:
+        return None
+
+    top1_intent, s1 = candidates[0]
+    top2_intent, s2 = candidates[1] if len(candidates) > 1 else ("", 0.0)
+    delta = s1 - s2
+
+    # Ambiguous band clarification: s1 in [0.785, threshold) and delta < 0.06
+    if 0.785 <= s1 < threshold and delta < 0.06 and top2_intent:
+        name1 = friendly_intent_name(top1_intent)
+        name2 = friendly_intent_name(top2_intent)
+        res_intent = Intent("clarification", text, options=[top1_intent, top2_intent], query=f"Did you mean {name1} or {name2}?")
+        res_intent.router_path = "semantic_clarification"
+        res_intent.confidence_margin = round(float(delta), 4)
+        return res_intent
+
     matched = router.match(text, threshold=threshold)
     if matched is None:
         return None
-
     intent_key, score, exemplar = matched
     logger.info("Semantic match: '%s' -> %s (score %.3f via '%s')", text, intent_key, score, exemplar)
 
+    res_intent: Intent
     if intent_key.startswith("quick_reply:"):
         sub = intent_key.split(":", 1)[1]
-        return Intent("quick_reply", text, note_text=sub)
-
-    if intent_key.startswith("voice_settings:"):
+        res_intent = Intent("quick_reply", text, note_text=sub)
+    elif intent_key.startswith("voice_settings:"):
         gender = intent_key.split(":", 1)[1]
-        return Intent("voice_settings", text, voice_gender=gender)
-
-    if intent_key.startswith("clearance_elevate:"):
+        res_intent = Intent("voice_settings", text, voice_gender=gender)
+    elif intent_key.startswith("clearance_elevate:"):
         lvl = intent_key.split(":", 1)[1]
-        return Intent("clearance_prompt", text, query=lvl)
-
-    if intent_key == "clearance_lockdown":
-        return Intent("clearance_lockdown", text)
-
-    if intent_key == "clearance_status":
-        return Intent("clearance_status", text)
-
-    if intent_key == "clear_cache":
-        return Intent("clear_cache", text)
-
-    if intent_key == "team_progress":
+        res_intent = Intent("clearance_prompt", text, query=lvl)
+    elif intent_key == "clearance_lockdown":
+        res_intent = Intent("clearance_lockdown", text)
+    elif intent_key == "clearance_status":
+        res_intent = Intent("clearance_status", text)
+    elif intent_key == "clear_cache":
+        res_intent = Intent("clear_cache", text)
+    elif intent_key == "team_progress":
         from .router import _match_team_progress
         p = _match_team_progress(text)
-        return p if p is not None else Intent("team_progress", text)
-
-    if intent_key == "timeline_diff":
-        return Intent("timeline_diff", text)
-
-    if intent_key == "open_team_excel":
-        return Intent("open_team_excel", text)
-
-    if intent_key == "approve_email":
-        return Intent("approve_email", text)
-
-    if intent_key.startswith("system_authority:"):
+        if p is not None:
+            res_intent = p
+        elif any(w in text.lower() for w in ("timeline", "progress", "tracker", "quota", "wbs")):
+            res_intent = Intent("team_progress", text)
+        else:
+            return None
+    elif intent_key == "timeline_diff":
+        res_intent = Intent("timeline_diff", text)
+    elif intent_key == "open_team_excel":
+        res_intent = Intent("open_team_excel", text)
+    elif intent_key == "approve_email":
+        res_intent = Intent("approve_email", text)
+    elif intent_key == "email_report":
+        res_intent = Intent("email_report", text)
+    elif intent_key == "calendar_query":
+        tf = "today" if "today" in text.lower() else "this week"
+        res_intent = Intent("calendar_query", text, query=tf)
+    elif intent_key == "measurable_task":
+        res_intent = Intent("measurable_task", text, action="list")
+    elif intent_key.startswith("system_authority:"):
         act = intent_key.split(":", 1)[1]
-        return Intent("system_authority", text, action=act)
-
-    if intent_key == "ppt_control:next":
-        return Intent("ppt_control", text, action="next")
-
-    if intent_key == "ppt_control:prev":
-        return Intent("ppt_control", text, action="previous")
-
-    if intent_key == "open_file":
+        res_intent = Intent("system_authority", text, action=act)
+    elif intent_key == "ppt_control:next":
+        res_intent = Intent("ppt_control", text, action="next")
+    elif intent_key == "ppt_control:prev":
+        res_intent = Intent("ppt_control", text, action="previous")
+    elif intent_key == "open_file":
         from ..tools.file_navigator import parse_file_query
         q, exts = parse_file_query(text)
         ext_hint = next(iter(exts)) if exts else None
-        return Intent("open_file", text, query=q or text, note_text=ext_hint)
-
-    if intent_key == "progress":
+        res_intent = Intent("open_file", text, query=q or text, note_text=ext_hint)
+    elif intent_key == "progress":
         from .router import _resolve_with_followup, normalize
-        from ..config import get_settings
-        s = get_settings()
+        from ..config import Settings
+        s = Settings.from_env()
         res = _resolve_with_followup(text, normalize(text), s.desktop_root, None)
-        return Intent("progress", text, resolution=res)
+        res_intent = Intent("progress", text, resolution=res)
+    else:
+        res_intent = Intent(intent_key, text)
 
-    return Intent(intent_key, text)
+    res_intent.router_path = "semantic"
+    res_intent.confidence_margin = round(float(score), 4)
+    return res_intent

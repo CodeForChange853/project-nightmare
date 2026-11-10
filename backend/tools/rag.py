@@ -85,6 +85,7 @@ class ProjectRAG:
         self._embs_norm = None
         self._file_cache: dict[tuple[str, int], list[DocChunk]] = {}  # (path_str, mtime_ns) -> chunks
         self._indexed_mtimes: dict[str, int] = {}
+        self._last_index_time: float = 0.0
 
     def _get_model(self):
         if self._model is not None:
@@ -109,6 +110,9 @@ class ProjectRAG:
 
     def index_all(self) -> int:
         """Scan desktop project docs and build in-memory embedding matrix."""
+        if self._chunks and (time.perf_counter() - self._last_index_time) < 30.0:
+            return len(self._chunks)
+
         model = self._get_model()
         if model is None:
             return 0
@@ -118,11 +122,18 @@ class ProjectRAG:
         except (PathError, OSError):
             return 0
 
+        PRUNE_DIRS = {"node_modules", ".venv", "venv", "env", ".git", "dist", "build", "__pycache__", "data"}
         all_chunks: list[DocChunk] = []
         for project in projects:
+            if project.name.lower() in PRUNE_DIRS or project.name.lower().endswith(".db"):
+                continue
             try:
                 for doc in _iter_safe_docs(project, self.desktop_root):
                     if not doc.is_file():
+                        continue
+                    if doc.name.lower().endswith(".db") or doc.suffix.lower() == ".db":
+                        continue
+                    if any(part.lower() in PRUNE_DIRS or part.lower().endswith(".db") for part in doc.parts):
                         continue
                     try:
                         mtime = doc.stat().st_mtime_ns
@@ -149,6 +160,7 @@ class ProjectRAG:
         if not all_chunks:
             self._chunks = []
             self._embs_norm = None
+            self._last_index_time = time.perf_counter()
             return 0
 
         try:
@@ -158,6 +170,7 @@ class ProjectRAG:
             norms = np.linalg.norm(embs, axis=1, keepdims=True)
             self._embs_norm = embs / np.maximum(norms, 1e-9)
             self._chunks = all_chunks
+            self._last_index_time = time.perf_counter()
             return len(all_chunks)
         except Exception as exc:
             logger.warning("Failed to embed RAG chunks: %s", exc)

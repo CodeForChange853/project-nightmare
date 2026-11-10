@@ -16,7 +16,7 @@ import pytest
 
 from backend.config import Settings
 from backend.core.actions import Registry, execute, plan_send_team_nudge
-from backend.core.clearance import ClearanceManager, LEVEL_1, LEVEL_3, LEVEL_5
+from backend.core.clearance import ClearanceManager, LEVEL_5
 from backend.core.orchestrator import Orchestrator
 from backend.core.router import route
 from backend.tools.audit import Audit
@@ -397,9 +397,6 @@ def test_stale_task_workflow_and_smtp_confirmation(tmp_path: Path, audit_db: Aud
         registry = Registry({})
         clearance = ClearanceManager()
 
-        # Pre-elevate default session to Level 5
-        clearance._sessions["default"] = (LEVEL_5, time.monotonic() + 600)
-
         from backend.core.llm import NoLLMProvider
         orch = Orchestrator(
             settings=settings,
@@ -441,28 +438,13 @@ def test_stale_task_workflow_and_smtp_confirmation(tmp_path: Path, audit_db: Aud
             state = audit_db.get_team_task_state("TASK-1")
             assert state["snoozed"] is True
 
-        # 3. Test APPROVE at Level 1 (Clearance Guard)
+        # 3. Test APPROVE (Sends email)
         # Reset snooze for test
         audit_db.update_team_task_notified("TASK-1", notified_ts=0)
         # Generate a fresh pending action
         rescan = await orch.handle("show team progress", session="default")
         assert rescan.needs_confirm is True
         pid2 = rescan.pending_id
-
-        clearance._sessions["low_priv"] = (LEVEL_1, time.monotonic() + 600)
-        with patch("smtplib.SMTP") as mock_smtp:
-            blocked_reply = await orch.confirm(pid2, approve=True, session="low_priv")
-            mock_smtp.assert_not_called()
-            assert blocked_reply.ok is False
-            assert "requires Level 5 access" in blocked_reply.text
-
-        # 4. Test APPROVE at Level 5 (Sends email)
-        # Put plan back in pending for pid2
-        plan = orch.pending._items.get(pid2)
-        if not plan:
-            # Re-trigger to generate a pending plan
-            rescan2 = await orch.handle("show team progress", session="default")
-            pid2 = rescan2.pending_id
 
         with patch("smtplib.SMTP") as mock_smtp_cls:
             mock_server = MagicMock()
@@ -529,7 +511,6 @@ def test_voice_approve_email_intent(tmp_path: Path, audit_db: Audit):
             team_excel_path=xlsx_file,
         )
         clearance = ClearanceManager()
-        clearance._sessions["default"] = (LEVEL_5, time.monotonic() + 600)
 
         from backend.core.llm import NoLLMProvider
         orch = Orchestrator(
@@ -910,9 +891,8 @@ def test_timeline_diff_router_and_clearance(tmp_path: Path, audit_db: Audit):
         it_progress2 = route("/timeline", settings, registry)
         assert it_progress2.kind == "team_progress"
 
-        # 2. Clearance Enforcement: Blocked at Level 1 (Observer)
+        # 2. Remote / Readonly Session Blocked
         clearance = ClearanceManager()
-        clearance._sessions["user_l1"] = (LEVEL_1, time.monotonic() + 600)
         from backend.core.llm import NoLLMProvider
         orch = Orchestrator(
             settings=settings,
@@ -922,24 +902,11 @@ def test_timeline_diff_router_and_clearance(tmp_path: Path, audit_db: Audit):
             clearance=clearance,
         )
 
-        rep_l1 = await orch.handle("what changed in the citizengraph timeline", session="user_l1")
-        assert rep_l1.ok is False
-        assert "requires Level 5 access" in rep_l1.text
-        assert rep_l1.ui == "clearance_prompt:5"
+        rep_remote = await orch.handle("what changed in the citizengraph timeline", session="user_ro", readonly=True)
+        assert rep_remote.ok is True
+        assert rep_remote.ui == "team_progress:diff"
 
-        # 3. Clearance Enforcement: Blocked at Level 3 (Operator)
-        clearance._sessions["user_l3"] = (LEVEL_3, time.monotonic() + 600)
-        rep_l3 = await orch.handle("what changed in the citizengraph timeline", session="user_l3")
-        assert rep_l3.ok is False
-        assert "requires Level 5 access" in rep_l3.text
-
-        # 4. Clearance Enforcement: Blocked on Remote / Readonly Sessions
-        rep_remote = await orch.handle("what changed in the citizengraph timeline", session="user_l1", readonly=True)
-        assert rep_remote.ok is False
-        assert "requires Level 5 access" in rep_remote.text
-
-        # 5. Clearance Enforcement: Allowed at Level 5 (Architect)
-        clearance._sessions["user_l5"] = (LEVEL_5, time.monotonic() + 600)
+        # 3. Local Level 5 Session Allowed
         rep_l5 = await orch.handle("what changed in the citizengraph timeline", session="user_l5")
         assert rep_l5.ok is True
         assert rep_l5.ui == "team_progress:diff"
@@ -968,22 +935,16 @@ def test_api_endpoints_team_tracker(tmp_path: Path):
     app = create_app(settings, NoLLMProvider())
     c = TestClient(app, base_url="http://127.0.0.1:8000")
     headers = {"X-Nightmare-Token": token}
+    remote_headers = {"X-Nightmare-Token": token, "X-Forwarded-For": "100.64.0.99"}
 
-    # 1. Level 1 Session -> endpoints block with 403
-    r_diff = c.get("/api/team-tracker/diff", headers=headers)
-    assert r_diff.status_code == 403
-
-    r_sync = c.post("/api/team-tracker/sync", headers=headers)
+    # 1. Remote Session -> mutation endpoints block with 403
+    r_sync = c.post("/api/team-tracker/sync", headers=remote_headers)
     assert r_sync.status_code == 403
 
-    r_open = c.post("/api/team-tracker/open-excel", headers=headers)
+    r_open = c.post("/api/team-tracker/open-excel", headers=remote_headers)
     assert r_open.status_code == 403
 
-    # 2. Elevate to Level 5
-    elev_res = c.post("/api/clearance/elevate", json={"level": 5, "secret": token}, headers=headers)
-    assert elev_res.status_code == 200
-
-    # 3. Level 5 Session -> endpoints succeed
+    # 2. Local Level 5 Session -> endpoints succeed
     r_diff_l5 = c.get("/api/team-tracker/diff", headers=headers)
     assert r_diff_l5.status_code == 200
     assert "has_changes" in r_diff_l5.json()
@@ -1038,11 +999,10 @@ def test_voice_intent_and_file_opening_fixes(tmp_path: Path):
     assert i_excel3.kind == "open_team_excel"
 
     # Execution requires Level 5
-    rep_l1 = asyncio.run(orch.handle("open citizengraph timeline in excel", session="test_sess"))
-    assert rep_l1.ok is False
-    assert "Level 5" in rep_l1.text
+    rep_ro = asyncio.run(orch.handle("open citizengraph timeline in excel", session="test_sess", readonly=True))
+    assert rep_ro.ok is False
+    assert "read-only" in rep_ro.text.lower()
 
-    clearance.set_level("test_sess", LEVEL_5)
     with patch("backend.tools.file_navigator.safe_open_file", return_value=(True, "Opened file")):
         rep_l5 = asyncio.run(orch.handle("open citizengraph timeline in excel", session="test_sess"))
         assert rep_l5.ok is True
@@ -1092,5 +1052,162 @@ def test_voice_intent_and_file_opening_fixes(tmp_path: Path):
     i_ppt = route("go to next slide 11", settings, Registry())
     assert i_ppt.kind == "ppt_control"
     assert i_ppt.slide == 11
+
+
+def test_remodeled_10col_objectives_and_summary_footer_filtering():
+    """Verifies remodeled CitizenGraph_Thesis_Timeline_2026_2027.xlsx schema:
+    - Tab 1 stops before '8-MONTH ROADMAP STATUS SUMMARY' and ignores summary rows.
+    - Tab 1 classifies '■' and '◆' markers properly.
+    - Tab 3 parses 10-column schema (GO-0 + SO-1..SO-7) without matching Row 2 subtitle.
+    """
+    from backend.tools.team_tracker import (
+        extract_gdrive_file_id,
+        parse_roadmap_sheet,
+        parse_objectives_sheet,
+    )
+
+    # 1. Verify extract_gdrive_file_id
+    sheet_url = "https://docs.google.com/spreadsheets/d/1Kw4_zboMzpv2WKdJHeNVuSYSfW4Gg_xm/edit?usp=drive_link&ouid=109543692766011182977&rtpof=true&sd=true"
+    assert extract_gdrive_file_id(sheet_url) == "1Kw4_zboMzpv2WKdJHeNVuSYSfW4Gg_xm"
+    assert extract_gdrive_file_id("https://drive.google.com/drive/folders/1P4CWnBnYfLkkGKnrAswe9lwX5HcCQYDg") is None
+
+    # 2. Verify Tab 1 summary footer filtering & ■ / ◆ markers
+    roadmap_grid = {
+        (4, 1): {"value": "Stage ID"},
+        (4, 2): {"value": "Timeline Stage"},
+        (4, 3): {"value": "Calendar Span"},
+        (4, 4): {"value": "Thesis Phase"},
+        (4, 5): {"value": "General Stage Title"},
+        (4, 6): {"value": "Citizen Graph Aligned Activities & Core Focus"},
+        (4, 7): {"value": "Major Milestone / Output"},
+        (4, 8): {"value": "Status"},
+        (4, 9): {"value": "M1\nAug '26"},
+        (4, 10): {"value": "M2\nSep '26"},
+        (5, 1): {"value": "STG-01"},
+        (5, 2): {"value": "Stage 1"},
+        (5, 3): {"value": "Aug – Sep 2026"},
+        (5, 4): {"value": "Phase 1"},
+        (5, 5): {"value": "Topic Formulation & Adviser Alignment"},
+        (5, 6): {"value": "Select research topic"},
+        (5, 7): {"value": "Approved Topic"},
+        (5, 8): {"value": "Completed"},
+        (5, 9): {"value": "■", "fill_rgb": "0284C7"},
+        (5, 10): {"value": "◆", "fill_rgb": "4F46E5"},
+        (15, 1): {"value": "8-MONTH ROADMAP STATUS SUMMARY"},
+        (16, 1): {"value": "Completed Stages"},
+        (16, 2): {"value": "2"},
+        (17, 1): {"value": "In Progress Stages"},
+        (17, 2): {"value": "1"},
+        (18, 1): {"value": "Pending Stages"},
+        (18, 2): {"value": "6"},
+    }
+    stages = parse_roadmap_sheet(roadmap_grid)
+    assert len(stages) == 1
+    assert stages[0]["stage_id"] == "STG-01"
+    assert stages[0]["months"][0]["active"] is True
+    assert stages[0]["months"][0]["status"] == "core"
+    assert stages[0]["months"][0]["color"] == "#0284C7"
+    assert stages[0]["months"][1]["active"] is True
+    assert stages[0]["months"][1]["status"] == "milestone"
+
+    # 3. Verify Tab 3 10-column layout with Row 2 subtitle containing 'Objective' and 'Target'
+    obj_grid = {
+        (1, 1): {"value": "CITIZEN GRAPH: STUDY OBJECTIVES, TEAM GOALS & QUANTITATIVE KPI ALIGNMENT MATRIX"},
+        (2, 1): {"value": "Direct Traceability from Chapter 1 Objectives → Team Action Plan → System Modules → Target Benchmarks"},
+        (4, 1): {"value": "Obj ID"},
+        (4, 2): {"value": "Task Filter / Type"},
+        (4, 3): {"value": "Metric Category"},
+        (4, 4): {"value": "Study Objective Statement (General & Specific)"},
+        (4, 5): {"value": "Team Goal / Action Plan"},
+        (4, 6): {"value": "Core Architectural Component"},
+        (4, 7): {"value": "Target Evaluation Dataset / Scope"},
+        (4, 8): {"value": "Quantitative Target Benchmark / KPI"},
+        (4, 9): {"value": "Primary Phase & Window"},
+        (4, 10): {"value": "Current Status"},
+        (5, 1): {"value": "GO-0"},
+        (5, 2): {"value": "General Objective"},
+        (5, 3): {"value": "End-to-End System"},
+        (5, 4): {"value": "Design, develop, and evaluate CitizenGraph."},
+        (5, 5): {"value": "Deliver full 6-stage pipeline"},
+        (5, 6): {"value": "Full 6-Stage CitizenGraph Architecture"},
+        (5, 7): {"value": "Pasig City Public Complaint Corpus"},
+        (5, 8): {"value": "End-to-End Pipeline Operational"},
+        (5, 9): {"value": "Phase 1 & Phase 2\n(Aug 2026 – Mar 2027)"},
+        (5, 10): {"value": "In Progress"},
+        (6, 1): {"value": "SO-1"},
+        (6, 2): {"value": "Data & Corpus"},
+        (6, 3): {"value": "Data Quality"},
+        (6, 4): {"value": "Construct and preprocess a multilingual complaint dataset."},
+        (6, 5): {"value": "Collect, clean, and annotate complaints"},
+        (6, 6): {"value": "Stage 1: Data Acquisition"},
+        (6, 7): {"value": "Pasig City Complaints"},
+        (6, 8): {"value": "Cohen's Kappa κ ≥ 0.80"},
+        (6, 9): {"value": "Phase 1 & 2\n(Nov 2026 – Jan 2027)"},
+        (6, 10): {"value": "Pending"},
+    }
+    objs = parse_objectives_sheet(obj_grid)
+    assert len(objs) == 2
+    assert objs[0]["obj_id"] == "GO-0"
+    assert objs[0]["task_filter_type"] == "General Objective"
+    assert objs[0]["metric_category"] == "End-to-End System"
+    assert objs[0]["status"] == "In Progress"
+    assert objs[0]["scheduled_window"] == "Aug 2026 – Mar 2027"
+    assert objs[1]["obj_id"] == "SO-1"
+    assert objs[1]["status"] == "Pending"
+    assert "0.80" in objs[1]["target_kpi"]
+
+
+def test_gdrive_live_diff_and_sync(tmp_path: Path, audit_db: Audit):
+    """Verifies GDrive vs local/baseline diffing and sync_timeline_with_gdrive."""
+    from backend.tools.team_tracker import sync_timeline_with_gdrive
+
+    local_bytes = generate_citizengraph_v2_test_fixture()
+    gdrive_modified_bytes = generate_citizengraph_v2_test_fixture(
+        wbs_status_overrides={"1.6": "Completed"},
+        roadmap_status_overrides={"STG-03": "Completed"},
+    )
+    xlsx_file = tmp_path / "CitizenGraph_Thesis_Timeline_2026_2027.xlsx"
+    xlsx_file.write_bytes(local_bytes)
+
+    settings = Settings(
+        desktop_root=tmp_path,
+        api_token="test_token_1234567890abcdef",
+        team_excel_path=xlsx_file,
+        team_gdrive_folder_url="https://docs.google.com/spreadsheets/d/1Kw4_zboMzpv2WKdJHeNVuSYSfW4Gg_xm/edit?usp=drive_link",
+    )
+
+    mock_gd_info = {
+        "folder_url": settings.team_gdrive_folder_url,
+        "file_id": "1Kw4_zboMzpv2WKdJHeNVuSYSfW4Gg_xm",
+        "reachable": True,
+        "xlsx_downloaded": True,
+        "xlsx_size": len(gdrive_modified_bytes),
+        "status": "synced",
+        "status_code": 200,
+    }
+
+    # 1. Seed baseline from local_bytes
+    with patch("backend.tools.team_tracker.fetch_gdrive_excel_bytes", return_value=(local_bytes, mock_gd_info)):
+        initial_scan = scan_team_progress(settings=settings, audit=audit_db)
+        assert initial_scan["diff"]["has_changes"] is False
+
+    # 2. Simulate team updating Google Sheet (STG-03 & 1.6 -> Completed)
+    with patch("backend.tools.team_tracker.fetch_gdrive_excel_bytes", return_value=(gdrive_modified_bytes, mock_gd_info)):
+        diff_scan = scan_team_progress(settings=settings, audit=audit_db)
+        assert diff_scan["diff"]["has_changes"] is True
+        assert diff_scan["diff"]["change_count"] == 2
+        assert diff_scan["gdrive_info"]["status"] == "gdrive_changes_detected"
+
+        # 3. Sync pulls GDrive bytes to local Excel and commits new baseline
+        sync_res = sync_timeline_with_gdrive(settings=settings, audit=audit_db, pull_gdrive=True)
+        assert sync_res["ok"] is True
+        assert sync_res["gdrive_pulled"] is True
+        assert sync_res["committed_count"] == 37
+
+        # 4. Subsequent scan reports 0 changes and in_sync_with_gdrive
+        post_sync_scan = scan_team_progress(settings=settings, audit=audit_db)
+        assert post_sync_scan["diff"]["has_changes"] is False
+        assert post_sync_scan["gdrive_info"]["status"] == "in_sync_with_gdrive"
+
 
 

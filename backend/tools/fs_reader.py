@@ -16,7 +16,7 @@ import re
 import subprocess
 
 SKIP_DIRS = {
-    "node_modules", ".git", ".venv", "venv", "__pycache__", "dist", "build", "$recycle.bin",
+    "node_modules", ".git", ".venv", "venv", "env", "__pycache__", "dist", "build", "$recycle.bin", "data",
 }
 MAX_FILE_BYTES = 1_000_000
 MIN_SCORE = 0.75
@@ -167,6 +167,7 @@ def find_handoff(project_dir: Path, filename: str = "handoff.md", max_depth: int
                         entry.is_dir()
                         and not entry.name.startswith(".")
                         and entry.name.lower() not in SKIP_DIRS
+                        and not entry.name.lower().endswith(".db")
                     ):
                         next_level.append(Path(entry.path))
                 except OSError:
@@ -233,6 +234,8 @@ def is_safe_doc_name(filename: str) -> bool:
     p = Path(filename)
     if p.suffix.lower() not in ALLOWED_DOC_EXTS:
         return False
+    if p.name.lower().endswith(".db") or p.suffix.lower() == ".db":
+        return False
     if BLOCKED_DOC_RE.search(p.name):
         return False
     return True
@@ -250,7 +253,7 @@ def _iter_safe_docs(project_dir: Path, root: Path, max_depth: int = 3) -> list[P
                 continue
             for entry in entries:
                 try:
-                    if entry.name.startswith("."):
+                    if entry.name.startswith(".") or entry.name.lower().endswith(".db"):
                         continue
                     p = Path(entry.path)
                     if entry.is_file() and is_safe_doc_name(entry.name):
@@ -259,7 +262,7 @@ def _iter_safe_docs(project_dir: Path, root: Path, max_depth: int = 3) -> list[P
                             docs.append(p)
                         except PathError:
                             continue
-                    elif entry.is_dir() and entry.name.lower() not in SKIP_DIRS:
+                    elif entry.is_dir() and entry.name.lower() not in SKIP_DIRS and not entry.name.lower().endswith(".db"):
                         next_level.append(p)
                 except OSError:
                     continue

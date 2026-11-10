@@ -2,14 +2,14 @@
 
 Parses shared Excel timelines (.xlsx) using Python's standard library
 zipfile + xml.etree.ElementTree (zero external pip dependencies).
-Supports the 4-tab CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx structure:
+Supports the 4-tab CitizenGraph_Thesis_Timeline_2026_2027.xlsx structure:
   1. General 8-Month Roadmap (STG-01..STG-09)
   2. Detailed Weekly Gantt (1.1..1.12, 2.1..2.9)
-  3. Objectives & KPI Alignment (SO-1..SO-7)
+  3. Objectives & KPI Alignment (GO-0, SO-1..SO-7, 10-column & legacy 8-column)
   4. Phase Summary & Dashboard (Live Python rollups & KPI targets)
-Maintains baseline snapshot in SQLite Audit database, provides cross-reference
-diff engine against Google Drive shared source, performs automatic 3-day stale
-quota detection, and generates Level 5 email nudgers.
+Maintains baseline snapshot in SQLite Audit database, provides live Google Drive
+spreadsheet (.xlsx) export & cross-reference diff engine, performs automatic 3-day
+stale quota detection, and generates Level 5 email nudgers.
 """
 from __future__ import annotations
 
@@ -18,11 +18,11 @@ import io
 import logging
 import os
 import re
+import time
 import urllib.request
 import zipfile
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +32,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_GDRIVE_URL = (
+    "https://docs.google.com/spreadsheets/d/1Kw4_zboMzpv2WKdJHeNVuSYSfW4Gg_xm/"
+    "edit?usp=drive_link&ouid=109543692766011182977&rtpof=true&sd=true"
+)
+DEFAULT_EXCEL_FILENAME = "CitizenGraph_Thesis_Timeline_2026_2027.xlsx"
+
 # Canonical fill colors & badges
 COLOR_CORE_HEX = "9DC3E6"       # Core Work (#9DC3E6)
 COLOR_BUFFER_HEX = "C6E0B4"     # Buffer / Polish (#C6E0B4)
@@ -39,6 +45,10 @@ COLOR_MILESTONE_HEX = "FFD966"  # Milestone (#FFD966)
 COLOR_PHASE1_HEX = "0284C7"     # Sky Blue Phase 1 (#0284C7)
 COLOR_PHASE2_HEX = "0D9488"     # Teal Phase 2 (#0D9488)
 COLOR_INDIGO_HEX = "4F46E5"     # Indigo Milestone (#4F46E5)
+
+# In-memory short-lived cache for GDrive export bytes so back-to-back calls don't block
+_GDRIVE_CACHE: dict[str, tuple[float, bytes | None, dict[str, Any]]] = {}
+_GDRIVE_CACHE_TTL = 25.0
 
 
 def _strip_ns(tag: str) -> str:
@@ -61,44 +71,78 @@ def _split_cell_ref(ref: str) -> tuple[int, int]:
 
 
 def resolve_team_excel_path(settings: Settings | None = None) -> Path | None:
-    """Finds the team Excel timeline file path from settings, env, or file_navigator."""
-    # 1. Configured path
-    configured = None
+    """Finds the team Excel timeline file path from settings, env, OneDrive thesis dir, or desktop."""
+    # 1. Configured path from settings or environment
+    configured: Path | None = None
     if settings and settings.team_excel_path:
-        configured = settings.team_excel_path
+        configured = Path(settings.team_excel_path).expanduser()
     elif os.environ.get("NIGHTMARE_TEAM_EXCEL_PATH", "").strip():
         configured = Path(os.environ["NIGHTMARE_TEAM_EXCEL_PATH"].strip().strip('"\'')).expanduser()
 
-    if configured and configured.is_file():
-        return configured
+    if configured:
+        if configured.is_file():
+            return configured
+        # If configured path directory exists, check sibling timeline filenames
+        if configured.parent.is_dir():
+            for name in (
+                configured.name,
+                "CitizenGraph_Thesis_Timeline_2026_2027.xlsx",
+                "CitizenGraph_Thesis_Timeline_2026_2027-v3.xlsx",
+                "CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx",
+            ):
+                cand = configured.parent / name
+                if cand.is_file():
+                    return cand
 
-    # 2. Check desktop root for CitizenGraph or NexEnroll timeline
+    # 2. Check standard OneDrive Thesis folder and desktop root
+    candidate_dirs: list[Path] = []
     if settings and settings.desktop_root:
-        for name in (
-            "CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx",
-            "CitizenGraph_Thesis_Timeline_2027-v2.xlsx",
-            "NexEnroll_Development_Timeline.xlsx",
-        ):
-            candidate = settings.desktop_root / name
+        candidate_dirs.append(Path(settings.desktop_root))
+    home = Path.home()
+    for rel in (
+        Path("OneDrive") / "Documents" / "4RTH-YEAR THESIS RESARCH AND DOCUMENTATION",
+        Path("Documents") / "4RTH-YEAR THESIS RESARCH AND DOCUMENTATION",
+        Path("Desktop"),
+        Path("OneDrive") / "Desktop",
+    ):
+        d = home / rel
+        if d.is_dir() and d not in candidate_dirs:
+            candidate_dirs.append(d)
+
+    candidate_names = (
+        "CitizenGraph_Thesis_Timeline_2026_2027.xlsx",
+        "CitizenGraph_Thesis_Timeline_2026_2027-v3.xlsx",
+        "CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx",
+        "CitizenGraph_Thesis_Timeline_2027-v2.xlsx",
+        "NexEnroll_Development_Timeline.xlsx",
+    )
+    for d in candidate_dirs:
+        for name in candidate_names:
+            candidate = d / name
             if candidate.is_file():
                 return candidate
 
-    # 3. Auto-discover via file_navigator
-    try:
-        from .file_navigator import find_files
-        matches = find_files("CitizenGraph Timeline", [".xlsx"])
-        if matches:
-            return Path(matches[0]["path"])
-        matches = find_files("Timeline", [".xlsx"])
-        if matches:
-            return Path(matches[0]["path"])
-        matches_progress = find_files("Progress", [".xlsx"])
-        if matches_progress:
-            return Path(matches_progress[0]["path"])
-    except Exception as exc:
-        logger.debug("Auto-discovery via file_navigator failed: %s", exc)
-
     return None
+
+
+def resolve_timeline_workbook(
+    desktop_root: Path | None = None,
+    configured_path: Path | None = None,
+) -> Path | None:
+    """Backward-compatible helper used by orchestrator._do_open_team_excel."""
+    if configured_path and Path(configured_path).is_file():
+        return Path(configured_path)
+    if desktop_root:
+        for name in (
+            "CitizenGraph_Thesis_Timeline_2026_2027.xlsx",
+            "CitizenGraph_Thesis_Timeline_2026_2027-v3.xlsx",
+            "CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx",
+            "NexEnroll_Development_Timeline.xlsx",
+        ):
+            cand = Path(desktop_root) / name
+            if cand.is_file():
+                return cand
+    return resolve_team_excel_path(None)
 
 
 class OpenXMLSheetReader:
@@ -187,7 +231,10 @@ class OpenXMLSheetReader:
                 for el in root.iter():
                     if _strip_ns(el.tag) == "sheet":
                         name = el.attrib.get("name", "")
-                        rid = el.attrib.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id") or el.attrib.get("r:id")
+                        rid = (
+                            el.attrib.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+                            or el.attrib.get("r:id")
+                        )
                         if name and rid and rid in wb_rels:
                             self._sheets[name.lower()] = wb_rels[rid]
             except Exception as exc:
@@ -268,10 +315,11 @@ def _classify_month_cell(cell: dict[str, Any]) -> dict[str, Any]:
     val = cell.get("value", "")
     color = (cell.get("color") or "").upper().replace("#", "")
 
-    # Priority 1: Milestone (Color FFD966 / 4F46E5 or Star / Milestone text)
+    # Priority 1: Milestone (Color FFD966 / 4F46E5 or Diamond ◆ / Star ★ / Milestone text)
     if (
         COLOR_MILESTONE_HEX in color
         or COLOR_INDIGO_HEX in color
+        or "◆" in val
         or "★" in val
         or "⭐" in val
         or "star" in val.lower()
@@ -280,21 +328,32 @@ def _classify_month_cell(cell: dict[str, Any]) -> dict[str, Any]:
         return {
             "status": "milestone",
             "type": "Milestone",
-            "color": "#4F46E5" if COLOR_INDIGO_HEX in color else "#FFD966",
+            "color": "#4F46E5" if (COLOR_INDIGO_HEX in color or "◆" in val) else "#FFD966",
             "text": val,
             "active": True,
         }
     # Priority 2: Phase 1 / Core Work (#0284C7 or #9DC3E6)
-    if COLOR_PHASE1_HEX in color or COLOR_CORE_HEX in color or "●" in val or "core" in val.lower():
+    if (
+        COLOR_PHASE1_HEX in color
+        or COLOR_CORE_HEX in color
+        or ("■" in val and COLOR_PHASE2_HEX not in color)
+        or "●" in val
+        or "core" in val.lower()
+    ):
         return {
             "status": "core",
             "type": "Phase 1 / Core",
-            "color": "#0284C7" if COLOR_PHASE1_HEX in color else "#9DC3E6",
+            "color": "#0284C7" if (COLOR_PHASE1_HEX in color or "■" in val) else "#9DC3E6",
             "text": val,
             "active": True,
         }
     # Priority 3: Phase 2 / Buffer / Polish (#0D9488 or #C6E0B4)
-    if COLOR_PHASE2_HEX in color or COLOR_BUFFER_HEX in color or "buffer" in val.lower() or "polish" in val.lower():
+    if (
+        COLOR_PHASE2_HEX in color
+        or COLOR_BUFFER_HEX in color
+        or "buffer" in val.lower()
+        or "polish" in val.lower()
+    ):
         return {
             "status": "buffer",
             "type": "Phase 2 / Polish",
@@ -304,7 +363,7 @@ def _classify_month_cell(cell: dict[str, Any]) -> dict[str, Any]:
         }
 
     # Text indicator fallback
-    if val and val.strip() in {"●", "★", "⭐", "x", "X", "1", "v", "V"}:
+    if val and val.strip() in {"■", "◆", "●", "★", "⭐", "x", "X", "1", "v", "V"}:
         return {
             "status": "active",
             "type": "Active",
@@ -338,7 +397,7 @@ def _normalize_status(val: str, fallback: str = "Pending") -> str:
 # ==============================================================================
 
 def parse_roadmap_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> list[dict[str, Any]]:
-    """Extracts General 8-Month Roadmap (Rows 5-13, STG-01..STG-09)."""
+    """Extracts General 8-Month Roadmap (Rows 5-13, STG-01..STG-09), ignoring summary footer rows."""
     if not grid:
         return []
 
@@ -351,7 +410,7 @@ def parse_roadmap_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> list[dic
         row_vals = {c: grid.get((r, c), {}).get("value", "").strip() for c in range(1, 30)}
         row_lower = {c: v.lower() for c, v in row_vals.items()}
 
-        found_stage = any("stage" in v or "stg" in v for v in row_lower.values())
+        found_stage = any("stage id" in v or v in ("stg", "stage #") for v in row_lower.values())
         found_m = any("m1" in v or "aug" in v or "month 1" in v for v in row_lower.values())
 
         if found_stage and found_m:
@@ -368,7 +427,7 @@ def parse_roadmap_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> list[dic
                     col_map["phase"] = c
                 elif "general stage title" in tl or "stage title" in tl or "title" in tl:
                     col_map["title"] = c
-                elif "aligned activities" in tl or "core focus" in tl or "activities" in tl:
+                elif "aligned activities" in tl or "core activities" in tl or "team goals" in tl or "core focus" in tl or "activities" in tl:
                     col_map["activities"] = c
                 elif "milestone" in tl or "output" in tl:
                     col_map["milestone"] = c
@@ -377,7 +436,7 @@ def parse_roadmap_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> list[dic
 
                 for m in range(1, 9):
                     if f"m{m}" in tl or f"month {m}" in tl:
-                        month_cols[m] = (c, text)
+                        month_cols[m] = (c, " ".join(text.split()))
             break
 
     if header_row is None:
@@ -393,7 +452,7 @@ def parse_roadmap_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> list[dic
     col_map.setdefault("status", 8)
 
     month_labels = [
-        "M1 Aug '26", "M2 Sept '26", "M3 Oct '26", "M4 Nov '26",
+        "M1 Aug '26", "M2 Sep '26", "M3 Oct '26", "M4 Nov '26",
         "M5 Dec '26", "M6 Jan '27", "M7 Feb '27", "M8 Mar '27",
     ]
     if not month_cols:
@@ -405,10 +464,18 @@ def parse_roadmap_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> list[dic
         stg_id = grid.get((r, col_map["stage_id"]), {}).get("value", "").strip()
         title = grid.get((r, col_map["title"]), {}).get("value", "").strip()
 
-        # Match STG-01..STG-09 or valid stage row
+        # Stop immediately if we reach the summary block at the bottom of the sheet
+        if stg_id and ("status summary" in stg_id.lower() or stg_id.lower() in {"completed stages", "in progress stages", "pending stages"}):
+            break
+
         if not stg_id and not title:
             continue
-        if stg_id and not (re.match(r"^STG-\d+", stg_id, re.I) or "stage" in stg_id.lower() or stg_id.isdigit()):
+
+        # Strictly require STG-XX, Stage X, or digit stage ID (reject footer labels like "Completed Stages")
+        if stg_id:
+            if not (re.match(r"^STG-\d+$", stg_id, re.I) or re.match(r"^Stage\s*\d+$", stg_id, re.I) or stg_id.isdigit()):
+                continue
+        elif not title:
             continue
 
         stg_name = grid.get((r, col_map["stage_name"]), {}).get("value", "").strip()
@@ -465,8 +532,8 @@ def parse_weekly_gantt_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> lis
         row_vals = {c: grid.get((r, c), {}).get("value", "").strip() for c in range(1, 40)}
         row_lower = {c: v.lower() for c, v in row_vals.items()}
 
-        found_wbs = any("wbs" in v or "1.1" in v for v in row_lower.values())
-        found_week = any("s-w1" in v or "w1" in v or "week" in v for v in row_lower.values())
+        found_wbs = any("wbs id" in v or v in ("wbs", "wbs #") for v in row_lower.values())
+        found_week = any("s-w1" in v or "o-w1" in v for v in row_lower.values())
 
         if found_wbs or (found_week and any("deliverable" in v for v in row_lower.values())):
             header_row = r
@@ -476,11 +543,11 @@ def parse_weekly_gantt_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> lis
                     col_map["wbs_id"] = c
                 elif "phase" in tl or "stage" in tl:
                     col_map["phase"] = c
-                elif "task / activity" in tl or "task description" in tl or tl in {"task", "activity"}:
+                elif "task / activity" in tl or "task description" in tl or "shared team goal" in tl or tl in {"task", "activity"}:
                     col_map["task"] = c
-                elif "aligned thesis" in tl or "system module" in tl or "module" in tl:
+                elif "aligned thesis" in tl or "study objective" in tl or "system module" in tl or "module" in tl:
                     col_map["module"] = c
-                elif "deliverable" in tl or "target metric" in tl:
+                elif "deliverable" in tl or "target metric" in tl or "benchmark result" in tl:
                     col_map["deliverable"] = c
                 elif tl in {"period", "scheduled window", "window"}:
                     col_map["period"] = c
@@ -488,7 +555,7 @@ def parse_weekly_gantt_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> lis
                     col_map["status"] = c
 
                 m_week = re.match(r"^([A-Z])[-_]?W?(\d+)$", text.upper())
-                if m_week or "W1" in text.upper() or "W2" in text.upper():
+                if m_week or text.upper().endswith(("-W1", "-W2", "-W3", "-W4")):
                     idx = len(week_cols) + 1
                     if idx <= 24:
                         week_cols[idx] = (c, text)
@@ -523,9 +590,8 @@ def parse_weekly_gantt_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> lis
         if not wbs_id and not task_desc:
             continue
         # Filter rows: must look like WBS task (1.1..1.12, 2.1..2.9)
-        if wbs_id and not re.match(r"^\d+\.\d+", wbs_id):
-            if not task_desc:
-                continue
+        if wbs_id and not re.match(r"^\d+\.\d+$", wbs_id):
+            continue
 
         phase = grid.get((r, col_map["phase"]), {}).get("value", "").strip()
         module = grid.get((r, col_map["module"]), {}).get("value", "").strip()
@@ -584,11 +650,27 @@ def parse_weekly_gantt_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> lis
 
 
 # ==============================================================================
-# TAB 3: Objectives & KPI Alignment (SO-1 .. SO-7)
+# TAB 3: Objectives & KPI Alignment (GO-0, SO-1 .. SO-7)
 # ==============================================================================
 
+def _split_phase_and_window(raw_phase_win: str, raw_window: str = "") -> tuple[str, str]:
+    """Splits combined 'Phase 1: Ch 1–3 (Oct W2 – Oct W4, 2026)' into (phase, window)."""
+    p = raw_phase_win.strip()
+    w = raw_window.strip()
+    if w:
+        return p, w
+    m = re.match(r"^(.+?)\s*\(([^()]+)\)\s*$", p)
+    if m:
+        cand_phase = m.group(1).strip()
+        cand_win = m.group(2).strip()
+        # Check if parenthesized part looks like a calendar window (month / week / year)
+        if any(k in cand_win.lower() for k in ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec", "w1", "w2", "w3", "w4", "2026", "2027")):
+            return cand_phase, cand_win
+    return p, w
+
+
 def parse_objectives_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> list[dict[str, Any]]:
-    """Extracts Objectives & KPI Alignment (Rows 5-11, SO-1..SO-7)."""
+    """Extracts Objectives & KPI Alignment (supports both remodeled 10-column GO-0..SO-7 and legacy 8-column SO-1..SO-7)."""
     if not grid:
         return []
 
@@ -598,28 +680,39 @@ def parse_objectives_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> list[
 
     for r in range(1, min(max_row + 1, 15)):
         row_vals = {c: grid.get((r, c), {}).get("value", "").strip() for c in range(1, 20)}
-        row_lower = {c: v.lower() for c, v in row_vals.items()}
+        non_empty = {c: v for c, v in row_vals.items() if v}
+        if len(non_empty) < 4:
+            continue
 
-        found_obj = any("obj id" in v or "so-1" in v or "objective" in v for v in row_lower.values())
-        found_kpi = any("kpi" in v or "benchmark" in v for v in row_lower.values())
+        row_lower = {c: v.lower() for c, v in non_empty.items()}
+        found_obj_id = any("obj id" in v or v in ("id", "objective id") for v in row_lower.values())
+        found_status = any("status" in v for v in row_lower.values())
 
-        if found_obj or found_kpi:
+        if found_obj_id or (found_status and any("kpi" in v or "benchmark" in v for v in row_lower.values())):
             header_row = r
-            for c, text in row_vals.items():
+            for c, text in non_empty.items():
                 tl = text.lower()
                 if "obj id" in tl or tl in {"id", "objective id", "so"}:
                     col_map["obj_id"] = c
-                elif "objective statement" in tl or "objective" in tl or "statement" in tl:
+                elif "task filter" in tl or "action category" in tl:
+                    col_map["task_filter_type"] = c
+                elif "evaluation metric filter" in tl or "metric filter" in tl or "metric category" in tl:
+                    col_map["metric_category"] = c
+                elif "objective statement" in tl or "study objective" in tl or ("objective" in tl and "filter" not in tl and "id" not in tl):
                     col_map["statement"] = c
-                elif "architectural component" in tl or "component" in tl:
+                elif "shared team goal" in tl or "measurable task" in tl or "friendly action" in tl:
+                    col_map["team_goal"] = c
+                elif "architectural" in tl or "system scope" in tl or "component" in tl:
                     col_map["component"] = c
-                elif "dataset" in tl or "scope" in tl:
+                elif "dataset" in tl or "test condition" in tl or ("scope" in tl and "system scope" not in tl):
                     col_map["scope"] = c
                 elif "kpi" in tl or "benchmark" in tl:
                     col_map["kpi"] = c
-                elif "primary phase" in tl or "phase" in tl:
+                elif "primary phase" in tl and "window" in tl:
+                    col_map["phase_and_window"] = c
+                elif "primary phase" in tl or tl == "phase":
                     col_map["phase"] = c
-                elif "scheduled window" in tl or "window" in tl or "schedule" in tl:
+                elif "scheduled window" in tl or tl == "window" or "schedule" in tl:
                     col_map["window"] = c
                 elif tl == "status" or "current status" in tl:
                     col_map["status"] = c
@@ -628,14 +721,34 @@ def parse_objectives_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> list[
     if header_row is None:
         header_row = 4
 
-    col_map.setdefault("obj_id", 1)
-    col_map.setdefault("statement", 2)
-    col_map.setdefault("component", 3)
-    col_map.setdefault("scope", 4)
-    col_map.setdefault("kpi", 5)
-    col_map.setdefault("phase", 6)
-    col_map.setdefault("window", 7)
-    col_map.setdefault("status", 8)
+    # Detect whether this sheet is 10-column (remodeled) or 8-column (legacy)
+    is_remodeled_10col = (
+        "task_filter_type" in col_map
+        or "team_goal" in col_map
+        or "phase_and_window" in col_map
+        or col_map.get("status", 0) >= 10
+    )
+
+    if is_remodeled_10col:
+        col_map.setdefault("obj_id", 1)
+        col_map.setdefault("task_filter_type", 2)
+        col_map.setdefault("metric_category", 3)
+        col_map.setdefault("statement", 4)
+        col_map.setdefault("team_goal", 5)
+        col_map.setdefault("component", 6)
+        col_map.setdefault("scope", 7)
+        col_map.setdefault("kpi", 8)
+        col_map.setdefault("phase_and_window", 9)
+        col_map.setdefault("status", 10)
+    else:
+        col_map.setdefault("obj_id", 1)
+        col_map.setdefault("statement", 2)
+        col_map.setdefault("component", 3)
+        col_map.setdefault("scope", 4)
+        col_map.setdefault("kpi", 5)
+        col_map.setdefault("phase", 6)
+        col_map.setdefault("window", 7)
+        col_map.setdefault("status", 8)
 
     objectives = []
     for r in range(header_row + 1, max_row + 1):
@@ -644,21 +757,37 @@ def parse_objectives_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> list[
 
         if not obj_id and not stmt:
             continue
-        if obj_id and not (re.match(r"^SO-\d+", obj_id, re.I) or "so" in obj_id.lower() or obj_id.isdigit()):
-            if not stmt:
+        # Strictly require GO-X or SO-X or numeric ID (never header or subtitle rows)
+        if obj_id:
+            if not (re.match(r"^(?:GO|SO)-\d+$", obj_id, re.I) or obj_id.isdigit()):
                 continue
+        else:
+            continue
 
+        task_filter = grid.get((r, col_map["task_filter_type"]), {}).get("value", "").strip() if "task_filter_type" in col_map else ""
+        metric_cat = grid.get((r, col_map["metric_category"]), {}).get("value", "").strip() if "metric_category" in col_map else ""
+        team_goal = grid.get((r, col_map["team_goal"]), {}).get("value", "").strip() if "team_goal" in col_map else ""
         component = grid.get((r, col_map["component"]), {}).get("value", "").strip()
         scope = grid.get((r, col_map["scope"]), {}).get("value", "").strip()
         kpi = grid.get((r, col_map["kpi"]), {}).get("value", "").strip()
-        phase = grid.get((r, col_map["phase"]), {}).get("value", "").strip()
-        window = grid.get((r, col_map["window"]), {}).get("value", "").strip()
+
+        if "phase_and_window" in col_map:
+            raw_pw = grid.get((r, col_map["phase_and_window"]), {}).get("value", "").strip()
+            phase, window = _split_phase_and_window(raw_pw)
+        else:
+            raw_p = grid.get((r, col_map.get("phase", 6)), {}).get("value", "").strip()
+            raw_w = grid.get((r, col_map.get("window", 7)), {}).get("value", "").strip()
+            phase, window = _split_phase_and_window(raw_p, raw_w)
+
         raw_status = grid.get((r, col_map["status"]), {}).get("value", "").strip()
         status = _normalize_status(raw_status)
 
         objectives.append({
-            "obj_id": obj_id or f"SO-{len(objectives)+1}",
-            "statement": stmt or f"Specific Objective {len(objectives)+1}",
+            "obj_id": obj_id.upper(),
+            "task_filter_type": task_filter,
+            "metric_category": metric_cat,
+            "statement": stmt or f"Study Objective {obj_id}",
+            "team_goal": team_goal,
             "component": component,
             "dataset_scope": scope,
             "target_kpi": kpi,
@@ -671,26 +800,64 @@ def parse_objectives_sheet(grid: dict[tuple[int, int], dict[str, Any]]) -> list[
 
 
 # ==============================================================================
-# TAB 4: Live Rollup Metric Calculations
+# TAB 4: Live Rollup Metric Calculations & Quantitative Target Parsing
 # ==============================================================================
+
+def parse_dashboard_sheet_targets(
+    grid: dict[tuple[int, int], dict[str, Any]],
+    obj_by_id: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Extracts Quantitative Evaluation Targets (Rows 12-17) from Tab 4 if present."""
+    if not grid:
+        return []
+
+    max_row = max(r for r, _ in grid.keys()) if grid else 1
+    target_header_row = None
+    for r in range(1, max_row + 1):
+        c1_val = grid.get((r, 1), {}).get("value", "").strip().lower()
+        c2_val = grid.get((r, 2), {}).get("value", "").strip().lower()
+        if "evaluation metric" in c1_val and ("target benchmark" in c2_val or "criterion" in c2_val):
+            target_header_row = r
+            break
+
+    if target_header_row is None:
+        return []
+
+    parsed_targets: list[dict[str, Any]] = []
+    for r in range(target_header_row + 1, max_row + 1):
+        metric_name = grid.get((r, 1), {}).get("value", "").strip()
+        criterion = grid.get((r, 2), {}).get("value", "").strip()
+        sample_cond = grid.get((r, 3), {}).get("value", "").strip()
+        chapter_ref = grid.get((r, 4), {}).get("value", "").strip()
+        filter_type = grid.get((r, 5), {}).get("value", "").strip()
+
+        if not metric_name or not criterion:
+            continue
+
+        m_so = re.search(r"(SO-\d+)", chapter_ref, re.I)
+        so_id = m_so.group(1).upper() if m_so else f"SO-{len(parsed_targets) + 4}"
+        obj_status = obj_by_id.get(so_id, {}).get("status", "Pending")
+
+        parsed_targets.append({
+            "id": so_id,
+            "name": metric_name,
+            "component": filter_type or chapter_ref,
+            "target": criterion,
+            "sample": sample_cond,
+            "chapter": chapter_ref,
+            "status": obj_status,
+        })
+
+    return parsed_targets
+
 
 def compute_dashboard_metrics(
     roadmap: list[dict[str, Any]],
     wbs: list[dict[str, Any]],
     objectives: list[dict[str, Any]],
+    dashboard_grid: dict[tuple[int, int], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Computes exact live rollup metrics from parsed sheets in plain Python."""
-    # 1. General Roadmap Rollup
-    total_roadmap = len(roadmap)
-    comp_roadmap = sum(1 for s in roadmap if s["status"] == "Completed")
-    prog_roadmap = sum(1 for s in roadmap if s["status"] == "In Progress")
-    pend_roadmap = sum(1 for s in roadmap if s["status"] == "Pending")
-    pct_roadmap = round((comp_roadmap / total_roadmap) * 100, 1) if total_roadmap > 0 else 0.0
-
-    # 2. Detailed WBS Rollups: Phase 1 & Phase 2
-    p1_tasks = [t for t in wbs if t["wbs_id"].startswith("1.") or "phase 1" in t["phase"].lower()]
-    p2_tasks = [t for t in wbs if t["wbs_id"].startswith("2.") or "phase 2" in t["phase"].lower()]
-
     def _summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
         tot = len(items)
         c = sum(1 for x in items if x["status"] == "Completed")
@@ -705,6 +872,14 @@ def compute_dashboard_metrics(
             "completion_pct": pct,
         }
 
+    # 1. General Roadmap Rollup
+    roadmap_summary = _summarize(roadmap)
+    roadmap_summary["label"] = f"General 8-Month Roadmap ({len(roadmap)} Stages)"
+
+    # 2. Detailed WBS Rollups: Phase 1 & Phase 2
+    p1_tasks = [t for t in wbs if t["wbs_id"].startswith("1.") or "phase 1" in t["phase"].lower()]
+    p2_tasks = [t for t in wbs if t["wbs_id"].startswith("2.") or "phase 2" in t["phase"].lower()]
+
     p1_summary = _summarize(p1_tasks)
     p1_summary["deadline"] = "2nd Week of Dec 2026"
     p1_summary["label"] = "Phase 1: Chapters 1-3 & Core Dev"
@@ -714,80 +889,80 @@ def compute_dashboard_metrics(
     p2_summary["label"] = "Phase 2: Evaluation & Chapters 4-6"
 
     wbs_overall = _summarize(wbs)
-    wbs_overall["label"] = "Overall Detailed WBS (21 Tasks)"
+    wbs_overall["label"] = f"Overall Detailed WBS ({len(wbs)} Tasks)"
 
-    # 3. Quantitative Benchmark Targets (SO-4 to SO-7)
+    # 3. Study Objectives Rollup (GO-0 + SO-1..SO-7)
+    obj_summary = _summarize(objectives)
+    obj_summary["label"] = f"Chapter 1.3 Study Objectives ({len(objectives)} Objectives)"
+
+    # 4. Quantitative Benchmark Targets (SO-4 to SO-7)
     obj_by_id = {o["obj_id"].upper(): o for o in objectives}
+    quantitative_targets = parse_dashboard_sheet_targets(dashboard_grid or {}, obj_by_id)
 
-    quantitative_targets = [
-        {
-            "id": "SO-4",
-            "name": "Citizen Return-Trip Prevention",
-            "component": "Neo4j DAG Verification",
-            "target": ">= 90%",
-            "target_num": 90,
-            "unit": "%",
-            "status": obj_by_id.get("SO-4", {}).get("status", "Pending"),
-        },
-        {
-            "id": "SO-4",
-            "name": "Exact-Match Citizen Resolution",
-            "component": "Prerequisite Graph Walk",
-            "target": ">= 95%",
-            "target_num": 95,
-            "unit": "%",
-            "status": obj_by_id.get("SO-4", {}).get("status", "Pending"),
-        },
-        {
-            "id": "SO-5",
-            "name": "Gap Analysis Metric (M = R \\ H)",
-            "component": "M = R \\ H Topological Engine",
-            "target": ">= 90%",
-            "target_num": 90,
-            "unit": "%",
-            "status": obj_by_id.get("SO-5", {}).get("status", "In Progress"),
-        },
-        {
-            "id": "SO-6",
-            "name": "Topological Sequence Accuracy",
-            "component": "Topological Sorter / DAG",
-            "target": ">= 90%",
-            "target_num": 90,
-            "unit": "%",
-            "status": obj_by_id.get("SO-6", {}).get("status", "Pending"),
-        },
-        {
-            "id": "SO-6",
-            "name": "Post-AST Execution Guardrail",
-            "component": "Python AST Validator",
-            "target": ">= 95%",
-            "target_num": 95,
-            "unit": "%",
-            "status": obj_by_id.get("SO-6", {}).get("status", "Pending"),
-        },
-        {
-            "id": "SO-7",
-            "name": "Edge Query Latency",
-            "component": "Local Neo4j Graph DB",
-            "target": "<= 5.0s",
-            "target_num": 5.0,
-            "unit": "s",
-            "status": obj_by_id.get("SO-7", {}).get("status", "Pending"),
-        },
-    ]
+    if not quantitative_targets:
+        quantitative_targets = [
+            {
+                "id": "SO-4",
+                "name": "Citizen Return-Trip Prevention",
+                "component": "Neo4j DAG Verification",
+                "target": ">= 90%",
+                "target_num": 90,
+                "unit": "%",
+                "status": obj_by_id.get("SO-4", {}).get("status", "Pending"),
+            },
+            {
+                "id": "SO-4",
+                "name": "Exact-Match Citizen Resolution",
+                "component": "Prerequisite Graph Walk",
+                "target": ">= 95%",
+                "target_num": 95,
+                "unit": "%",
+                "status": obj_by_id.get("SO-4", {}).get("status", "Pending"),
+            },
+            {
+                "id": "SO-5",
+                "name": "Gap Analysis Metric (M = R \\ H)",
+                "component": "M = R \\ H Topological Engine",
+                "target": ">= 90%",
+                "target_num": 90,
+                "unit": "%",
+                "status": obj_by_id.get("SO-5", {}).get("status", "Pending"),
+            },
+            {
+                "id": "SO-6",
+                "name": "Topological Sequence Accuracy",
+                "component": "Topological Sorter / DAG",
+                "target": ">= 90%",
+                "target_num": 90,
+                "unit": "%",
+                "status": obj_by_id.get("SO-6", {}).get("status", "Pending"),
+            },
+            {
+                "id": "SO-6",
+                "name": "Post-AST Execution Guardrail",
+                "component": "Python AST Validator",
+                "target": ">= 95%",
+                "target_num": 95,
+                "unit": "%",
+                "status": obj_by_id.get("SO-6", {}).get("status", "Pending"),
+            },
+            {
+                "id": "SO-7",
+                "name": "Edge Query Latency",
+                "component": "Local Neo4j Graph DB",
+                "target": "<= 5.0s",
+                "target_num": 5.0,
+                "unit": "s",
+                "status": obj_by_id.get("SO-7", {}).get("status", "Pending"),
+            },
+        ]
 
     return {
-        "roadmap": {
-            "total": total_roadmap,
-            "completed": comp_roadmap,
-            "in_progress": prog_roadmap,
-            "pending": pend_roadmap,
-            "completion_pct": pct_roadmap,
-            "label": "General 8-Month Roadmap (9 Stages)",
-        },
+        "roadmap": roadmap_summary,
         "phase_1": p1_summary,
         "phase_2": p2_summary,
         "overall_wbs": wbs_overall,
+        "objectives": obj_summary,
         "quantitative_targets": quantitative_targets,
     }
 
@@ -965,46 +1140,103 @@ def parse_team_tasks_sheet(
 
 
 # ==============================================================================
-# Google Drive Cross-Reference & Diff Engine
+# Google Drive Spreadsheet Export, Cross-Reference & Diff Engine
 # ==============================================================================
 
-def check_gdrive_source(settings: Settings | None = None) -> dict[str, Any]:
-    """Checks Google Drive folder reachability or local sync path."""
+def extract_gdrive_file_id(url: str) -> str | None:
+    """Extracts the Google Spreadsheet / Drive file ID from a URL (ignores folder URLs)."""
+    if not url or "/drive/folders/" in url:
+        return None
+    m = re.search(r"/(?:spreadsheets|file)/d/([a-zA-Z0-9_-]{15,})", url)
+    if m:
+        return m.group(1)
+    m_id = re.search(r"[?&]id=([a-zA-Z0-9_-]{15,})", url)
+    if m_id:
+        return m_id.group(1)
+    return None
+
+
+def fetch_gdrive_excel_bytes(
+    settings: Settings | None = None,
+    timeout: int = 8,
+    force: bool = False,
+) -> tuple[bytes | None, dict[str, Any]]:
+    """Downloads the live .xlsx bytes from Google Sheets / Google Drive if configured."""
     folder_url = (
         settings.team_gdrive_folder_url
         if settings and settings.team_gdrive_folder_url
-        else "https://drive.google.com/drive/folders/1P4CWnBnYfLkkGKnrAswe9lwX5HcCQYDg?usp=sharing"
+        else os.environ.get("NIGHTMARE_TEAM_GDRIVE_FOLDER_URL", "").strip().strip('"\'') or DEFAULT_GDRIVE_URL
     )
     sync_path = settings.team_gdrive_sync_path if settings else None
+    sync_exists = bool(sync_path and sync_path.exists())
+    sync_file_str = str(sync_path) if sync_exists else None
 
-    sync_exists = False
-    sync_file_str = None
-    if sync_path and sync_path.exists():
-        sync_exists = True
-        sync_file_str = str(sync_path)
+    file_id = extract_gdrive_file_id(folder_url)
+    now = time.monotonic()
 
+    if not force and folder_url in _GDRIVE_CACHE:
+        cached_ts, cached_bytes, cached_info = _GDRIVE_CACHE[folder_url]
+        if now - cached_ts < _GDRIVE_CACHE_TTL:
+            return cached_bytes, dict(cached_info)
+
+    export_url = f"https://docs.google.com/spreadsheets/d/{file_id}/export?format=xlsx" if file_id else None
+    xlsx_bytes: bytes | None = None
     url_reachable = False
     status_code = None
-    try:
-        req = urllib.request.Request(
-            folder_url,
-            headers={"User-Agent": "Mozilla/5.0 Nightmare/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            status_code = resp.status
-            url_reachable = (status_code == 200)
-    except Exception as exc:
-        logger.debug("GDrive reachability check failed (offline/timeout): %s", exc)
-        url_reachable = False
 
-    return {
+    if export_url:
+        for candidate_url in (
+            export_url,
+            f"https://drive.google.com/uc?export=download&id={file_id}",
+        ):
+            try:
+                req = urllib.request.Request(
+                    candidate_url,
+                    headers={"User-Agent": "Mozilla/5.0 Nightmare/1.0"},
+                )
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    status_code = getattr(resp, "status", 200)
+                    raw = resp.read()
+                    url_reachable = (status_code == 200)
+                    if isinstance(raw, bytes) and raw[:2] == b"PK":
+                        xlsx_bytes = raw
+                        break
+            except Exception as exc:
+                logger.debug("GDrive export download failed (%s): %s", candidate_url, exc)
+
+    if not url_reachable:
+        try:
+            req = urllib.request.Request(
+                folder_url,
+                headers={"User-Agent": "Mozilla/5.0 Nightmare/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                status_code = getattr(resp, "status", 200)
+                url_reachable = (status_code == 200)
+        except Exception as exc:
+            logger.debug("GDrive reachability check failed (offline/timeout): %s", exc)
+            url_reachable = False
+
+    info = {
         "folder_url": folder_url,
+        "file_id": file_id,
+        "export_url": export_url,
         "sync_path": sync_file_str,
         "sync_exists": sync_exists,
         "reachable": url_reachable,
-        "status": "synced" if sync_exists else ("reachable" if url_reachable else "offline"),
+        "xlsx_downloaded": xlsx_bytes is not None,
+        "xlsx_size": len(xlsx_bytes) if xlsx_bytes else 0,
+        "status": "synced" if (sync_exists or xlsx_bytes is not None) else ("reachable" if url_reachable else "offline"),
         "status_code": status_code,
     }
+    _GDRIVE_CACHE[folder_url] = (now, xlsx_bytes, info)
+    return xlsx_bytes, info
+
+
+def check_gdrive_source(settings: Settings | None = None) -> dict[str, Any]:
+    """Checks Google Drive spreadsheet / folder reachability and export status."""
+    _, info = fetch_gdrive_excel_bytes(settings=settings, timeout=6, force=False)
+    return info
 
 
 def _hash_record(rec: dict[str, Any]) -> str:
@@ -1012,14 +1244,68 @@ def _hash_record(rec: dict[str, Any]) -> str:
     return hashlib.sha256(key_fields.encode("utf-8")).hexdigest()[:12]
 
 
+def _build_state_items(
+    roadmap: list[dict[str, Any]],
+    wbs: list[dict[str, Any]],
+    objectives: list[dict[str, Any]],
+    now_int: int,
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for s in roadmap:
+        rec = {
+            "item_key": s["stage_id"],
+            "sheet_name": "roadmap",
+            "title": s["title"],
+            "phase": s["phase"],
+            "status": s["status"],
+            "period": s["calendar_span"],
+            "deliverable": s["milestone"],
+            "updated_at": now_int,
+        }
+        rec["source_hash"] = _hash_record(rec)
+        items.append(rec)
+
+    for t in wbs:
+        rec = {
+            "item_key": t["wbs_id"],
+            "sheet_name": "wbs",
+            "title": t["task_description"],
+            "phase": t["phase"],
+            "status": t["status"],
+            "period": t["period"],
+            "deliverable": t["deliverable"],
+            "updated_at": now_int,
+        }
+        rec["source_hash"] = _hash_record(rec)
+        items.append(rec)
+
+    for o in objectives:
+        rec = {
+            "item_key": o["obj_id"],
+            "sheet_name": "objectives",
+            "title": o["statement"],
+            "phase": o["primary_phase"],
+            "status": o["status"],
+            "period": o["scheduled_window"],
+            "deliverable": o["target_kpi"],
+            "updated_at": now_int,
+        }
+        rec["source_hash"] = _hash_record(rec)
+        items.append(rec)
+    return items
+
+
 def compare_timeline_sources(
     current_items: list[dict[str, Any]],
     audit: Audit | None = None,
     settings: Settings | None = None,
     current_dashboard: dict[str, Any] | None = None,
+    gdrive_items: list[dict[str, Any]] | None = None,
+    gdrive_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Compares current timeline items against stored baseline in SQLite Audit."""
-    gdrive_info = check_gdrive_source(settings)
+    """Compares current timeline items (and optional live GDrive items) against stored baseline in SQLite Audit."""
+    if gdrive_info is None:
+        gdrive_info = check_gdrive_source(settings)
 
     if audit is None:
         return {
@@ -1035,34 +1321,28 @@ def compare_timeline_sources(
         }
 
     baseline_rows = audit.get_timeline_baseline()
+    # Auto-heal corrupted legacy baseline if it contains footer/header rows or outdated v2 schema count
+    has_corrupted_rows = any(
+        r["item_key"] in ("Completed Stages", "In Progress Stages", "Pending Stages", "Obj ID")
+        or r["item_key"].startswith("Direct Traceability")
+        or r["title"] == r["item_key"]
+        for r in baseline_rows
+    )
+    if (not baseline_rows or has_corrupted_rows) and current_items:
+        audit.commit_timeline_baseline(current_items)
+        baseline_rows = audit.get_timeline_baseline()
+
     base_map = {(r["sheet_name"], r["item_key"]): r for r in baseline_rows}
 
-    # If no baseline established yet, commit current state as baseline
-    if not baseline_rows and current_items:
-        audit.commit_timeline_baseline(current_items)
-        p1_pct = (current_dashboard or {}).get("phase_1", {}).get("completion_pct", 0.0)
-        return {
-            "has_changes": False,
-            "change_count": 0,
-            "changes": [],
-            "status_transitions": [],
-            "schedule_shifts": [],
-            "deliverable_edits": [],
-            "completion_deltas": {},
-            "spoken_summary": (
-                f"Cross-referencing the CitizenGraph timeline against the baseline. "
-                f"Timeline is up to date with 0 changes detected. Phase 1 is at {p1_pct:.1f}% completion. "
-                f"Opening the Timeline Diff tab."
-            ),
-            "gdrive_info": gdrive_info,
-        }
+    # If live GDrive items were fetched and differ from local current_items, compare GDrive against baseline
+    effective_items = gdrive_items if gdrive_items else current_items
 
     status_transitions = []
     schedule_shifts = []
     deliverable_edits = []
     all_changes = []
 
-    for curr in current_items:
+    for curr in effective_items:
         key = (curr["sheet_name"], curr["item_key"])
         base = base_map.get(key)
         if not base:
@@ -1173,6 +1453,10 @@ def compare_timeline_sources(
             f"Opening the Timeline Diff tab."
         )
 
+    gdrive_info_out = dict(gdrive_info) if gdrive_info else {}
+    if gdrive_items is not None:
+        gdrive_info_out["status"] = "gdrive_changes_detected" if count > 0 else "in_sync_with_gdrive"
+
     return {
         "has_changes": count > 0,
         "change_count": count,
@@ -1182,13 +1466,114 @@ def compare_timeline_sources(
         "deliverable_edits": deliverable_edits,
         "completion_deltas": comp_delta,
         "spoken_summary": spoken,
-        "gdrive_info": gdrive_info,
+        "gdrive_info": gdrive_info_out,
     }
 
 
 # ==============================================================================
 # Full Scan and Sync Orchestrator
 # ==============================================================================
+
+def _parse_workbook_reader(
+    reader: OpenXMLSheetReader,
+    audit: Audit | None = None,
+    now_ts: int | None = None,
+) -> tuple[list[dict], list[dict], list[dict], dict, list[dict], list[dict]]:
+    # 1. Parse Tab 1: General 8-Month Roadmap
+    roadmap_grid = reader.read_sheet("general 8-month roadmap", "roadmap", "general")
+    roadmap = parse_roadmap_sheet(roadmap_grid)
+
+    # 2. Parse Tab 2: Detailed Weekly Gantt
+    wbs_grid = reader.read_sheet("detailed weekly gantt", "weekly gantt", "gantt")
+    wbs = parse_weekly_gantt_sheet(wbs_grid)
+
+    # 3. Parse Tab 3: Objectives & KPI Alignment
+    obj_grid = reader.read_sheet("objectives & kpi alignment", "objectives", "kpi")
+    objectives = parse_objectives_sheet(obj_grid)
+
+    # 4. Parse Tab 4 & Compute Live Rollups
+    dash_grid = reader.read_sheet("phase summary & dashboard", "phase summary", "dashboard")
+    dashboard = compute_dashboard_metrics(roadmap, wbs, objectives, dashboard_grid=dash_grid)
+
+    # 5. Legacy Timeline sheet check (if new tabs absent)
+    legacy_timeline_grid = reader.read_sheet("timeline")
+    legacy_timeline = parse_timeline_sheet(legacy_timeline_grid) if legacy_timeline_grid else []
+
+    # 6. Parse Team_Tasks sheet (quotas & 3-day stale tracking)
+    tasks_grid = reader.read_sheet("team_tasks", "tasks")
+    quotas = parse_team_tasks_sheet(tasks_grid, audit=audit, now_ts=now_ts)
+
+    return roadmap, wbs, objectives, dashboard, legacy_timeline, quotas
+
+
+def _should_use_live_gdrive(
+    settings: Settings | None,
+    resolved_path: Path | None,
+    explicit_excel_supplied: bool = False,
+) -> bool:
+    """Returns True when live Google Drive spreadsheet export should be queried."""
+    if explicit_excel_supplied:
+        return False
+    if settings and settings.team_gdrive_folder_url and settings.team_gdrive_folder_url != DEFAULT_GDRIVE_URL:
+        return True
+    if resolved_path is None:
+        return True
+    return resolved_path.name.lower() == DEFAULT_EXCEL_FILENAME.lower()
+
+
+def sync_timeline_with_gdrive(
+    settings: Settings | None = None,
+    audit: Audit | None = None,
+    pull_gdrive: bool = True,
+) -> dict[str, Any]:
+    """Pulls latest .xlsx from Google Drive (if reachable), updates local Excel file, and commits SQLite baseline."""
+    resolved_path = resolve_team_excel_path(settings)
+    if not resolved_path and settings and settings.team_excel_path:
+        resolved_path = Path(settings.team_excel_path).expanduser()
+
+    gdrive_synced_to_local = False
+    gdrive_bytes: bytes | None = None
+    gdrive_info: dict[str, Any] = {}
+
+    if pull_gdrive and _should_use_live_gdrive(settings, resolved_path):
+        gdrive_bytes, gdrive_info = fetch_gdrive_excel_bytes(settings=settings, timeout=10, force=True)
+        if gdrive_bytes and resolved_path:
+            try:
+                resolved_path.parent.mkdir(parents=True, exist_ok=True)
+                resolved_path.write_bytes(gdrive_bytes)
+                gdrive_synced_to_local = True
+            except OSError as exc:
+                logger.warning("Could not write GDrive .xlsx to %s: %s", resolved_path, exc)
+
+    scan = scan_team_progress(
+        settings=settings,
+        audit=audit,
+        excel_path=resolved_path if (resolved_path and resolved_path.is_file()) else gdrive_bytes,
+    )
+    count = 0
+    if audit is not None:
+        now_int = int(datetime.now().timestamp())
+        items = _build_state_items(
+            scan.get("roadmap", []),
+            scan.get("wbs", []),
+            scan.get("objectives", []),
+            now_int,
+        )
+        count = audit.commit_timeline_baseline(items)
+
+    return {
+        "ok": True,
+        "committed_count": count,
+        "gdrive_pulled": gdrive_synced_to_local,
+        "gdrive_info": gdrive_info or scan.get("gdrive_info", {}),
+        "file_path": str(resolved_path) if resolved_path else None,
+        "message": (
+            f"Synced latest Google Drive spreadsheet to {resolved_path.name} and committed {count} baseline records."
+            if gdrive_synced_to_local and resolved_path
+            else f"Successfully updated baseline with {count} records."
+        ),
+    }
+
 
 def scan_team_progress(
     settings: Settings | None = None,
@@ -1199,6 +1584,8 @@ def scan_team_progress(
 ) -> dict[str, Any]:
     """Full scan and sync of the 4-tab timeline, baseline diff, and team quotas."""
     resolved_path: Path | None = None
+    explicit_excel_supplied = excel_path is not None
+
     if isinstance(excel_path, bytes):
         reader = OpenXMLSheetReader(excel_path)
     elif excel_path is not None:
@@ -1219,41 +1606,36 @@ def scan_team_progress(
     else:
         resolved_path = resolve_team_excel_path(settings)
         if not resolved_path or not resolved_path.is_file():
-            return {
-                "ok": False,
-                "error": "No timeline Excel file found. Set NIGHTMARE_TEAM_EXCEL_PATH in backend/.env.",
-                "roadmap": [],
-                "wbs": [],
-                "objectives": [],
-                "dashboard": {},
-                "timeline": [],
-                "quotas": [],
-                "stale_tasks": [],
-            }
-        reader = OpenXMLSheetReader(resolved_path)
+            # Fallback: try live Google Drive export bytes if local file is missing
+            gd_bytes, _ = fetch_gdrive_excel_bytes(settings=settings, timeout=8)
+            if gd_bytes:
+                if settings and settings.team_excel_path:
+                    try:
+                        target_p = Path(settings.team_excel_path).expanduser()
+                        target_p.parent.mkdir(parents=True, exist_ok=True)
+                        target_p.write_bytes(gd_bytes)
+                        resolved_path = target_p
+                    except OSError:
+                        pass
+                reader = OpenXMLSheetReader(gd_bytes)
+            else:
+                return {
+                    "ok": False,
+                    "error": "No timeline Excel file found. Set NIGHTMARE_TEAM_EXCEL_PATH in backend/.env.",
+                    "roadmap": [],
+                    "wbs": [],
+                    "objectives": [],
+                    "dashboard": {},
+                    "timeline": [],
+                    "quotas": [],
+                    "stale_tasks": [],
+                }
+        else:
+            reader = OpenXMLSheetReader(resolved_path)
 
-    # 1. Parse Tab 1: General 8-Month Roadmap
-    roadmap_grid = reader.read_sheet("general 8-month roadmap", "roadmap", "general")
-    roadmap = parse_roadmap_sheet(roadmap_grid)
-
-    # 2. Parse Tab 2: Detailed Weekly Gantt
-    wbs_grid = reader.read_sheet("detailed weekly gantt", "weekly gantt", "gantt")
-    wbs = parse_weekly_gantt_sheet(wbs_grid)
-
-    # 3. Parse Tab 3: Objectives & KPI Alignment
-    obj_grid = reader.read_sheet("objectives & kpi alignment", "objectives", "kpi")
-    objectives = parse_objectives_sheet(obj_grid)
-
-    # 4. Compute Tab 4: Phase Summary & Dashboard Live Rollups
-    dashboard = compute_dashboard_metrics(roadmap, wbs, objectives)
-
-    # 5. Legacy Timeline sheet check (if new tabs absent)
-    legacy_timeline_grid = reader.read_sheet("timeline")
-    legacy_timeline = parse_timeline_sheet(legacy_timeline_grid) if legacy_timeline_grid else []
-
-    # 6. Parse Team_Tasks sheet (quotas & 3-day stale tracking)
-    tasks_grid = reader.read_sheet("team_tasks", "tasks")
-    quotas = parse_team_tasks_sheet(tasks_grid, audit=audit, now_ts=now_ts)
+    roadmap, wbs, objectives, dashboard, legacy_timeline, quotas = _parse_workbook_reader(
+        reader, audit=audit, now_ts=now_ts
+    )
 
     filtered_quotas = quotas
     if team_filter:
@@ -1264,55 +1646,34 @@ def scan_team_progress(
 
     stale_tasks = [q for q in quotas if q.get("stale") and not q.get("snoozed")]
 
-    # Flatten timeline items for SQLite state tracking
-    current_items: list[dict[str, Any]] = []
     now_int = int(now_ts or datetime.now().timestamp())
-
-    for s in roadmap:
-        rec = {
-            "item_key": s["stage_id"],
-            "sheet_name": "roadmap",
-            "title": s["title"],
-            "phase": s["phase"],
-            "status": s["status"],
-            "period": s["calendar_span"],
-            "deliverable": s["milestone"],
-            "updated_at": now_int,
-        }
-        rec["source_hash"] = _hash_record(rec)
-        current_items.append(rec)
-
-    for t in wbs:
-        rec = {
-            "item_key": t["wbs_id"],
-            "sheet_name": "wbs",
-            "title": t["task_description"],
-            "phase": t["phase"],
-            "status": t["status"],
-            "period": t["period"],
-            "deliverable": t["deliverable"],
-            "updated_at": now_int,
-        }
-        rec["source_hash"] = _hash_record(rec)
-        current_items.append(rec)
-
-    for o in objectives:
-        rec = {
-            "item_key": o["obj_id"],
-            "sheet_name": "objectives",
-            "title": o["statement"],
-            "phase": o["primary_phase"],
-            "status": o["status"],
-            "period": o["scheduled_window"],
-            "deliverable": o["target_kpi"],
-            "updated_at": now_int,
-        }
-        rec["source_hash"] = _hash_record(rec)
-        current_items.append(rec)
+    current_items = _build_state_items(roadmap, wbs, objectives, now_int)
 
     # Sync current items to SQLite as current state (is_baseline = 0)
     if audit is not None and current_items:
         audit.upsert_timeline_state(current_items, is_baseline=0)
+
+    # Check live Google Drive source (and parse GDrive items when scanning the live configured workbook)
+    gdrive_items: list[dict[str, Any]] | None = None
+    gdrive_info: dict[str, Any] | None = None
+    if _should_use_live_gdrive(settings, resolved_path, explicit_excel_supplied):
+        gdrive_bytes, gdrive_info = fetch_gdrive_excel_bytes(settings=settings, timeout=6)
+        if gdrive_bytes:
+            try:
+                gd_reader = OpenXMLSheetReader(gdrive_bytes)
+                gd_roadmap, gd_wbs, gd_obj, _, _, _ = _parse_workbook_reader(gd_reader, audit=None, now_ts=now_ts)
+                if gd_roadmap or gd_wbs or gd_obj:
+                    gdrive_items = _build_state_items(gd_roadmap, gd_wbs, gd_obj, now_int)
+            except Exception as exc:
+                logger.debug("Failed parsing GDrive workbook bytes: %s", exc)
+    else:
+        gdrive_info = {
+            "folder_url": (settings.team_gdrive_folder_url if settings else DEFAULT_GDRIVE_URL),
+            "sync_path": str(settings.team_gdrive_sync_path) if (settings and settings.team_gdrive_sync_path) else None,
+            "sync_exists": bool(settings and settings.team_gdrive_sync_path and settings.team_gdrive_sync_path.exists()),
+            "reachable": True,
+            "status": "local_cache",
+        }
 
     # Run Cross-Reference & Diff Engine
     diff = compare_timeline_sources(
@@ -1320,6 +1681,8 @@ def scan_team_progress(
         audit=audit,
         settings=settings,
         current_dashboard=dashboard,
+        gdrive_items=gdrive_items,
+        gdrive_info=gdrive_info,
     )
 
     # Backward compatibility: timeline points to wbs if roadmap/wbs present, else legacy
@@ -1328,7 +1691,7 @@ def scan_team_progress(
     return {
         "ok": True,
         "file_path": str(resolved_path) if resolved_path else "in_memory.xlsx",
-        "file_name": resolved_path.name if resolved_path else "in_memory.xlsx",
+        "file_name": resolved_path.name if resolved_path else DEFAULT_EXCEL_FILENAME,
         "roadmap": roadmap,
         "wbs": wbs,
         "objectives": objectives,

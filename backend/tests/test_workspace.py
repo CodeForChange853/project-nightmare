@@ -32,7 +32,6 @@ class Fake(LLMProvider):
 def orch(settings, registry):
     provider = Fake()
     o = Orchestrator(settings, provider, registry, Audit(settings.db_path))
-    o.clearance.set_level("default", 3)
     return o, provider
 
 

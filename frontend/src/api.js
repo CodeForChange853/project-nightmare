@@ -7,6 +7,10 @@ export class AuthError extends Error {
   }
 }
 
+export const translateMeeting = (text, signal) => call('/meeting/translate', {
+  method: 'POST', body: JSON.stringify({ text }), signal,
+})
+
 async function call(path, options = {}) {
   let res
   try {
@@ -16,6 +20,7 @@ async function call(path, options = {}) {
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     })
   } catch {
+    if (options.signal?.aborted) throw new DOMException('Cancelled', 'AbortError')
     throw new Error('Cannot reach the backend. Is `python -m backend` running?')
   }
   if (res.status === 401) {
@@ -29,7 +34,9 @@ async function call(path, options = {}) {
     throw new AuthError(detail)
   }
   if (res.status === 429) {
-    throw new Error('Too many failed PIN attempts. Wait 60 seconds and try again.')
+    let message = 'Too many requests. Try again shortly.'
+    try { message = (await res.json()).detail || message } catch { /* no JSON */ }
+    throw new Error(message)
   }
   if (res.status === 403) {
     let detail = 'Backend refused the request (origin/host or read-only session).'
@@ -77,6 +84,11 @@ export const getHelp = () => call('/help')
 
 export const resetSession = () => call('/session/reset', { method: 'POST' })
 
+export const getRouterReview = () => call('/router/review')
+
+export const approveRouterMiss = (miss_id, approved_intent) =>
+  call('/router/approve', { method: 'POST', body: JSON.stringify({ miss_id, approved_intent }) })
+
 // Database viewer: the PIN buys a short-lived token that lives only in React state.
 const dbHeaders = (token) => ({ 'X-DB-Token': token })
 
@@ -98,6 +110,12 @@ export const deleteDbNote = (token, id) =>
 export const deleteDbFact = (token, id) =>
   call(`/db/facts/${encodeURIComponent(id)}/delete`, { method: 'POST', headers: dbHeaders(token) })
 
+export const deleteDbCalendarEvent = (token, id) =>
+  call(`/db/calendar/${encodeURIComponent(id)}/delete`, { method: 'POST', headers: dbHeaders(token) })
+
+export const deleteDbMeasurableTask = (token, id) =>
+  call(`/db/tasks/${encodeURIComponent(id)}/delete`, { method: 'POST', headers: dbHeaders(token) })
+
 // Settings (apps.json): same idea as the database, its own PIN-bought token
 const settingsHeaders = (token) => ({ 'X-Settings-Token': token })
 
@@ -113,12 +131,7 @@ export const saveAppsConfig = (token, body) =>
 export const checkAppsEntry = (token, kind, spec) =>
   call('/settings/apps/check', { method: 'POST', headers: settingsHeaders(token), body: JSON.stringify({ kind, spec }) })
 
-// Security Clearance (Phase 8A: 3-Tier Architecture)
-export const elevateClearance = (level, secret) =>
-  call('/clearance/elevate', { method: 'POST', body: JSON.stringify({ level, secret }) })
-
-export const lockdownClearance = () => call('/clearance/lockdown', { method: 'POST' })
-
+// Security Clearance (Level 5 Architect Single-Tier)
 export const getClearanceStatus = () => call('/clearance/status')
 
 // Shared Drive Timeline & Team Quotas (Phase 8D)
@@ -135,3 +148,52 @@ export const getTimelineDiff = () => call('/team-tracker/diff')
 export const syncTimelineBaseline = () => call('/team-tracker/sync', { method: 'POST' })
 
 export const openTimelineInExcel = () => call('/team-tracker/open-excel', { method: 'POST' })
+
+// Priority Push Notifications (Real-Time Pub/Sub Email Feed)
+export const getPriorityEmails = (limit = 50, status = '', category = '') => {
+  const params = new URLSearchParams()
+  if (limit) params.set('limit', limit)
+  if (status) params.set('status', status)
+  if (category) params.set('category', category)
+  const q = params.toString() ? `?${params.toString()}` : ''
+  return call(`/emails/priority${q}`)
+}
+
+export const updateEmailStatus = (id, status = 'Read') =>
+  call(`/emails/${encodeURIComponent(id)}/status`, {
+    method: 'POST',
+    body: JSON.stringify({ status }),
+  })
+
+// Local Calendar & Measurable Tasks
+export const getCalendarEvents = (start = '', end = '') => {
+  const params = new URLSearchParams()
+  if (start) params.set('start', start)
+  if (end) params.set('end', end)
+  const q = params.toString() ? `?${params.toString()}` : ''
+  return call(`/calendar/events${q}`)
+}
+
+export const createCalendarEvent = (data) =>
+  call('/calendar/events', { method: 'POST', body: JSON.stringify(data) })
+
+export const getMeasurableTasks = () => call('/tasks/measurable')
+
+export const updateMeasurableTask = (data) =>
+  call('/tasks/measurable', { method: 'POST', body: JSON.stringify(data) })
+
+// Phase 8F Thesis Defense & Phase 9A Hardware Telemetry
+export const getDefenseSessions = (limit = 10) => call(`/defense/sessions?limit=${limit}`)
+export const getDefenseStatus = () => call('/defense/status')
+export const getHardwareTelemetry = () => call('/system/telemetry')
+export const getLiveWeather = (city = '', force = false) => {
+  const params = new URLSearchParams()
+  if (city) params.set('city', city)
+  if (force) params.set('force', 'true')
+  const q = params.toString() ? `?${params.toString()}` : ''
+  return call(`/weather${q}`)
+}
+export const setWindowMode = (mode) =>
+  call('/window/mode', { method: 'POST', body: JSON.stringify({ mode }) })
+
+

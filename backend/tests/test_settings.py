@@ -24,7 +24,6 @@ def full(settings):
     s = replace(settings, pin="123456", phone_pin="999999")
     c = TestClient(create_app(s, FakeLLM()), base_url="http://127.0.0.1:8000")
     assert c.post("/api/login", json={"pin": "123456"}).status_code == 200
-    c.post("/api/clearance/elevate", json={"level": 5, "secret": s.api_token})
     return c, s
 
 

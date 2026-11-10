@@ -8,7 +8,7 @@ import pytest
 
 from backend.config import Settings
 from backend.core.actions import Registry
-from backend.core.clearance import ClearanceManager, LEVEL_1, LEVEL_3
+from backend.core.clearance import ClearanceManager, LEVEL_5
 from backend.core.llm import NoLLMProvider
 from backend.core.orchestrator import Orchestrator
 from backend.core.router import route
@@ -151,8 +151,8 @@ def test_path_traversal_defense(tmp_path):
         safe_open_file(env_file, allowed_roots=[safe_root])
 
 
-# 4. Level 1 blocks file opening while Level 3 allows it
-def test_level_1_blocks_file_opening_while_level_3_allows(tmp_path, monkeypatch):
+# 4. Remote read-only blocks file opening while local Level 5 allows it
+def test_readonly_blocks_file_opening_while_local_allows(tmp_path, monkeypatch):
     import asyncio
 
     desktop = tmp_path / "Desktop"
@@ -187,24 +187,16 @@ def test_level_1_blocks_file_opening_while_level_3_allows(tmp_path, monkeypatch)
     query = "find file related to timeline and open it in powerpoint"
     session_id = "test_sess"
 
-    # Default session is Level 1 (Observer) -> must be blocked
-    reply_l1 = asyncio.run(orchestrator.handle(query, readonly=False, session=session_id))
-    assert reply_l1.ok is False
-    assert "Level 3" in reply_l1.text
+    # Remote read-only session -> must be blocked
+    reply_ro = asyncio.run(orchestrator.handle(query, readonly=True, session=session_id))
+    assert reply_ro.ok is False
+    assert "read-only" in reply_ro.text.lower()
     assert len(opened) == 0
 
-    # Verify clearance block logged in SQLite actions table
-    recent = audit.recent_actions(limit=5)
-    assert any(a["kind"] == "clearance_blocked" and "open_file" in a["detail"] for a in recent)
-
-    # Elevate session to Level 3 (Operator)
-    clearance.set_level(session_id, LEVEL_3)
-    assert clearance.get_level(session_id) == LEVEL_3
-
-    # Now Level 3 allows opening
-    reply_l3 = asyncio.run(orchestrator.handle(query, readonly=False, session=session_id))
-    assert reply_l3.ok is True
-    assert "timeline.pptx" in reply_l3.text
+    # Local session -> Level 5 allows opening
+    reply_l5 = asyncio.run(orchestrator.handle(query, readonly=False, session=session_id))
+    assert reply_l5.ok is True
+    assert "timeline.pptx" in reply_l5.text
     assert len(opened) == 1
     assert "timeline.pptx" in opened[0]
 
@@ -459,7 +451,6 @@ def test_exact_and_clear_winner_bypass_and_stateful_disambiguation(tmp_path, mon
     )
 
     session_id = "test_sess"
-    clearance.set_level(session_id, LEVEL_3)
 
     # 1. "open LCRO Interview checklist.docx in word" immediately opens without disambiguation
     rep1 = asyncio.run(orchestrator.handle("open LCRO Interview checklist.docx in word", session=session_id))
@@ -543,20 +534,17 @@ def test_exact_and_clear_winner_bypass_and_stateful_disambiguation(tmp_path, mon
     assert len(opened) == 8
     assert opened[-1] == "LCRO Interview checklist.docx"
 
-    # 9. Level 1 blocks selection turn
-    clearance.set_level(session_id, LEVEL_3)
-    clearance.set_level("l1_sess", LEVEL_1)
+    # 9. Remote read-only blocks selection turn
     rep_amb = asyncio.run(orchestrator.handle("open interview checklist", session=session_id))
     assert rep_amb.ok is False
     assert orchestrator._pending_file_choices is not None
 
-    # Selection turn attempted from Level 1 session must be blocked
-    rep_l1 = asyncio.run(orchestrator.handle("the first one", session="l1_sess"))
-    assert rep_l1.ok is False
-    assert "Level 3" in rep_l1.text
+    # Selection turn attempted from read-only session must be blocked
+    rep_ro = asyncio.run(orchestrator.handle("the first one", session=session_id, readonly=True))
+    assert rep_ro.ok is False
+    assert "read-only" in rep_ro.text.lower()
 
     # 10. Expiry drops choices
-    clearance.set_level(session_id, LEVEL_3)
     asyncio.run(orchestrator.handle("open interview checklist", session=session_id))
     assert orchestrator._pending_file_choices is not None
     orchestrator._pending_file_choices.expires_at = time.monotonic() - 1.0
@@ -604,7 +592,6 @@ def test_citizengraph_vs_nexenroll_file_matching_and_guard(tmp_path, monkeypatch
         audit=audit2,
         clearance=clearance,
     )
-    clearance.set_level("test_sess", LEVEL_3)
 
     opened = []
     if hasattr(os, "startfile"):

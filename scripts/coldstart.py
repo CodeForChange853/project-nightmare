@@ -70,10 +70,10 @@ def run_coldstart(seed_benchmarks: bool = True) -> dict:
             ),
             (
                 "clearance_status",
-                "Level 1 (Observer)",
+                "Level 5 (Architect)",
                 "ok",
                 "what is my clearance level",
-                "Your current clearance is Level 1, LEVEL 1 (OBSERVER).",
+                "Your current clearance is Level 5, LEVEL 5 (ARCHITECT).",
             ),
             (
                 "workspace_briefing",

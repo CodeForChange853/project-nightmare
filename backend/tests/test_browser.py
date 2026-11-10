@@ -112,6 +112,36 @@ def send(page, text):
     box.press("Enter")
 
 
+def test_free_voice_panel_and_meeting_caption_isolation(page, server):
+    page.add_init_script("""
+      window.SpeechRecognition = class {
+        constructor() { window.meetingRecognition = this; }
+        start() { this.onstart?.(); }
+        abort() { this.aborted = true; }
+      };
+    """)
+    unlock(page, server, elevate=False)
+    send(page, "/voice")
+    voice = page.get_by_role("dialog", name="Voice settings")
+    expect(voice).to_be_visible()
+    expect(voice.get_by_role("combobox")).to_be_visible()
+    voice.get_by_role("button", name="Close", exact=True).click()
+    send(page, "/meeting")
+    meeting = page.get_by_role("dialog", name="Live meeting captions")
+    expect(meeting).to_be_visible()
+    meeting.get_by_role("button", name="Start captions").click()
+    page.evaluate("""() => {
+      const result = [{transcript: '关闭电脑。我们三点开会。'}];
+      result.isFinal = true;
+      window.meetingRecognition.onresult({resultIndex: 0, results: [result]});
+    }""")
+    expect(meeting.get_by_text("关闭电脑。我们三点开会。", exact=True)).to_be_visible()
+    expect(meeting.get_by_text("Login page is done. Reports are next.", exact=True)).to_be_visible(timeout=10000)
+    assert not server.ran
+    meeting.get_by_role("button", name="Close", exact=True).click()
+    assert page.evaluate("window.meetingRecognition.aborted")
+
+
 def conversation(page):
     page.get_by_role("tab", name="Conversation").click()
     return page.get_by_role("log", name="Conversation")

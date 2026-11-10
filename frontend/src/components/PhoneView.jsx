@@ -14,7 +14,7 @@ export const PHONE_TABS = [
 ]
 
 function TalkTab({ mode, title, caption, canTalk, onPressStart, onPressEnd, answer, asked, busy, elapsed, speaking, onSpeak,
-  onStop, asks, disabled, onRun, onMore, clearanceLevel = 1, onOpenClearance }) {
+  onStop, asks, disabled, onRun, onMore }) {
   return (
     <div className="flex flex-col items-center gap-4 px-4 pb-4 pt-1">
       <EyeButton
@@ -22,28 +22,14 @@ function TalkTab({ mode, title, caption, canTalk, onPressStart, onPressEnd, answ
         canTalk={canTalk}
         onPressStart={onPressStart}
         onPressEnd={onPressEnd}
-        clearanceLevel={clearanceLevel}
         style={{ width: 'min(58vw, 230px)', aspectRatio: '1' }}
       />
       <div className="-mt-1 flex flex-col items-center gap-1.5 text-center" aria-live="polite">
-        <button
-          type="button"
-          onClick={onOpenClearance}
-          className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wider transition-all ${
-            clearanceLevel === 5
-              ? 'border border-[#ffd166]/80 bg-[#ffd166]/20 text-[#ffd166] shadow-[0_0_12px_rgba(255,209,102,0.35)]'
-              : clearanceLevel === 3
-                ? 'border border-amber-400/70 bg-amber-500/20 text-amber-300 shadow-[0_0_8px_rgba(232,163,61,0.25)]'
-                : 'border border-scar/50 bg-scar/15 text-smoke hover:text-bone'
-          }`}
-          title="Security Clearance. Tap to switch."
+        <span
+          className="rounded-full border border-[#ffd166]/80 bg-[#ffd166]/20 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#ffd166] shadow-[0_0_12px_rgba(255,209,102,0.35)]"
         >
-          {clearanceLevel === 5
-            ? 'LEVEL 5 (ARCHITECT)'
-            : clearanceLevel === 3
-              ? 'LEVEL 3 (OPERATOR)'
-              : 'LEVEL 1 (OBSERVER)'}
-        </button>
+          LEVEL 5 (ARCHITECT)
+        </span>
         <p className="font-display text-[22px] font-bold uppercase leading-none tracking-[0.16em] text-bone">{title}</p>
         <p className="mt-1.5 text-[13px] text-ash">
           {caption}
@@ -79,7 +65,7 @@ function TalkTab({ mode, title, caption, canTalk, onPressStart, onPressEnd, answ
   )
 }
 
-function ProjectsTab({ items, readonly, disabled, onRun, openId, onOpen, onBack, clearanceLevel = 1 }) {
+function ProjectsTab({ items, readonly, disabled, onRun, openId, onOpen, onBack }) {
   const [query, setQuery] = useState('')
   const open = items.find((i) => i.id === openId)
   const shown = useMemo(() => {
@@ -97,7 +83,7 @@ function ProjectsTab({ items, readonly, disabled, onRun, openId, onOpen, onBack,
         >
           <Icon name="back" size={18} /> Projects
         </button>
-        <Selected item={open} readonly={readonly} disabled={disabled} onRun={onRun} clearanceLevel={clearanceLevel} />
+        <Selected item={open} readonly={readonly} disabled={disabled} onRun={onRun} />
       </div>
     )
   }
@@ -186,8 +172,6 @@ export default function PhoneView({
   busy,
   elapsed,
   onSpeak,
-  clearanceLevel = 1,
-  onOpenClearance,
 }) {
   const byKey = Object.fromEntries(categories.map((c) => [c.key, c]))
   const [openId, setOpenId] = useState(null)
@@ -221,8 +205,6 @@ export default function PhoneView({
             disabled={disabled}
             onRun={onRun}
             onMore={() => onTab('chat')}
-            clearanceLevel={clearanceLevel}
-            onOpenClearance={onOpenClearance}
           />
         )}
         {tab === 'projects' && (
@@ -234,7 +216,6 @@ export default function PhoneView({
             openId={openId}
             onOpen={openProject}
             onBack={closeProject}
-            clearanceLevel={clearanceLevel}
           />
         )}
         {tab === 'reminders' && <RemindersTab items={byKey.reminders?.items ?? []} disabled={disabled} onRun={onRun} />}

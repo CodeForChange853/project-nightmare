@@ -1,11 +1,22 @@
-﻿import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import gsap from 'gsap'
-import { closeDb, deleteDbFact, deleteDbNote, getDbActions, getDbRecords, openDb } from '../api'
+import {
+  closeDb,
+  deleteDbCalendarEvent,
+  deleteDbFact,
+  deleteDbMeasurableTask,
+  deleteDbNote,
+  getDbActions,
+  getDbRecords,
+  openDb,
+} from '../api'
 import Icon from './Icon'
 
 const TABS = [
   { key: 'notes', label: 'Reminders' },
   { key: 'facts', label: 'Memory' },
+  { key: 'calendar', label: 'Calendar' },
+  { key: 'tasks', label: 'Measurable Tasks' },
   { key: 'actions', label: 'Activity log' },
   { key: 'llm_calls', label: 'Model calls' },
 ]
@@ -165,7 +176,15 @@ export default function DatabasePanel({ onClose }) {
     }
     setArmed(null)
     try {
-      await (tab === 'facts' ? deleteDbFact : deleteDbNote)(token, id)
+      const fn =
+        tab === 'facts'
+          ? deleteDbFact
+          : tab === 'calendar'
+          ? deleteDbCalendarEvent
+          : tab === 'tasks'
+          ? deleteDbMeasurableTask
+          : deleteDbNote
+      await fn(token, id)
       await load(token)
     } catch (err) {
       setError(err.message)
@@ -395,6 +414,109 @@ export default function DatabasePanel({ onClose }) {
                             </td>
                           </tr>
                         ))}
+                      </tbody>
+                    </>
+                  )}
+                  {tab === 'calendar' && (
+                    <>
+                      <thead>
+                        <tr>
+                          <Th className="w-12">#</Th>
+                          <Th>Event Title</Th>
+                          <Th className="w-28">Type</Th>
+                          <Th className="w-48">Start Date (ISO)</Th>
+                          <Th className="w-24" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((ev) => (
+                          <tr key={ev.id} className="text-bone even:bg-scab/40">
+                            <td className="px-3 py-2 text-ember">{ev.id}</td>
+                            <td className="break-words px-3 py-2 font-medium">{ev.title}</td>
+                            <td className="px-3 py-2">
+                              <span className="rounded bg-scar/30 px-2 py-0.5 text-[10.5px] font-mono text-amber-300 uppercase">
+                                {ev.event_type}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-[11px] font-mono text-ash">{ev.start_date}</td>
+                            <td className="px-3 py-2 text-right">
+                              <button
+                                type="button"
+                                onClick={() => remove(ev.id)}
+                                onBlur={() => setArmed((a) => (a === ev.id ? null : a))}
+                                className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] ${
+                                  armed === ev.id
+                                    ? 'border-ember bg-crimson/30 text-white'
+                                    : 'border-scar/60 text-ash hover:border-ember/60 hover:text-bone'
+                                }`}
+                              >
+                                <Icon name="trash" size={12} />
+                                {armed === ev.id ? 'Click to confirm' : 'Delete'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </>
+                  )}
+                  {tab === 'tasks' && (
+                    <>
+                      <thead>
+                        <tr>
+                          <Th className="w-12">#</Th>
+                          <Th>Measurable Task</Th>
+                          <Th className="w-44">Quantitative Progress</Th>
+                          <Th className="w-28">Status</Th>
+                          <Th className="w-24" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((t) => {
+                          const pct = t.target_progress > 0 ? Math.round((t.current_progress / t.target_progress) * 100) : 0
+                          const done = t.current_progress >= t.target_progress && t.target_progress > 0
+                          return (
+                            <tr key={t.id} className="text-bone even:bg-scab/40">
+                              <td className="px-3 py-2 text-ember">{t.id}</td>
+                              <td className="break-words px-3 py-2 font-medium">{t.title}</td>
+                              <td className="px-3 py-2">
+                                <div className="space-y-1">
+                                  <div className="flex items-center justify-between text-[11px] font-mono">
+                                    <span>
+                                      {t.current_progress} / {t.target_progress} {t.unit}
+                                    </span>
+                                    <span className={done ? 'text-emerald-400 font-bold' : 'text-amber-300'}>{pct}%</span>
+                                  </div>
+                                  <div className="h-1.5 w-full rounded-full bg-scar/40 overflow-hidden">
+                                    <div
+                                      className={`h-full transition-all ${done ? 'bg-emerald-400' : 'bg-gradient-to-r from-amber-500 to-crimson'}`}
+                                      style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className={`text-[11px] font-mono ${done ? 'text-emerald-400 font-bold' : 'text-amber-300'}`}>
+                                  {done ? 'Complete' : 'In Progress'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => remove(t.id)}
+                                  onBlur={() => setArmed((a) => (a === t.id ? null : a))}
+                                  className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] ${
+                                    armed === t.id
+                                      ? 'border-ember bg-crimson/30 text-white'
+                                      : 'border-scar/60 text-ash hover:border-ember/60 hover:text-bone'
+                                  }`}
+                                >
+                                  <Icon name="trash" size={12} />
+                                  {armed === t.id ? 'Click to confirm' : 'Delete'}
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </>
                   )}

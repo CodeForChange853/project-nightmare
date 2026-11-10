@@ -14,10 +14,48 @@ from urllib.parse import quote_plus
 from ..config import Settings
 from ..tools.fs_reader import EXPLICIT_DOC_RE, Resolution, normalize, resolve_project
 from .actions import Registry
-from .clearance import INTENT_CLEARANCE_MAP
+from .context_buffer import ConversationContext, get_context_buffer
+
+# STT Leading Filler Stripper (Layer 1)
+STT_FILLER_RE = re.compile(
+    r"^(?:i\s+said|said|hey\s+nightmare|nightmare|please|can\s+you|could\s+you|would\s+you)\s+",
+    re.I,
+)
+
+
+def strip_stt_fillers(text: str) -> str:
+    """Iteratively strips conversational STT lead-in prefixes before regex evaluation."""
+    s = text.strip()
+    while True:
+        m = STT_FILLER_RE.match(s)
+        if not m:
+            break
+        s = s[m.end():].strip()
+    return s
+
+
+def normalize_concatenations_and_typos(text: str) -> str:
+    """Splits joined command verbs and corrects speech-to-text typos."""
+    s = re.sub(r"\bopenfile\b", "open file", text, flags=re.I)
+    s = re.sub(r"\breadabout\b", "read about", s, flags=re.I)
+    s = re.sub(r"\bwakeup\b", "wake up", s, flags=re.I)
+    s = re.sub(r"\bprogres\b", "progress", s, flags=re.I)
+    s = re.sub(r"\bpowwers\b", "powers", s, flags=re.I)
+    s = re.sub(r"\b(?:open|visit|go\s+to|browse)\s+dribble\b", "open dribbble.com", s, flags=re.I)
+    s = re.sub(r"\bdribble\b", "dribbble.com", s, flags=re.I)
+    return s
+
+
+def pre_normalize(text: str) -> str:
+    """Runs STT leading filler stripping and concatenation/typo normalization."""
+    s = text.strip()
+    s = strip_stt_fillers(s)
+    s = normalize_concatenations_and_typos(s)
+    s = strip_stt_fillers(s)
+    return s
 
 RAW_CMD = re.compile(
-    r"^\s*(?:nightmare[, ]+)?(?:run|execute)\s+(?:the\s+)?(?:shell\s+)?command[: ]+(?P<cmd>.+?)\s*$",
+    r"^\s*(?:nightmare[, ]+)?(?:run|execute)\s+(?:a\s+|the\s+)?(?:shell\s+)?command[: ]+(?P<cmd>.+?)(?:\s+(?:in|on)\s+(?:my\s+)?(?:terminal|shell|cmd))?\s*$",
     re.I,
 )
 # polite / wake-word lead-in allowed before a command: "hey nightmare, can you please ..."
@@ -43,7 +81,7 @@ COMPLETE_NOTE_RE = re.compile(
 )
 # facts about the user or the world, kept until "forget ..." (reminders use "remind me to ...")
 REMEMBER_RE = re.compile(
-    LEAD + r"(?:remember\s+(?:that|this)|keep\s+in\s+mind(?:\s+that)?)[:,\s]+(?P<fact>.+?)\s*[.!]*$",
+    LEAD + r"(?:remember\s+(?:that|this)|keep\s+in\s+mind(?:\s+that)?|(?:save|saved|store|keep)(?:\s+this)?\s+in\s+(?:your\s+)?memory|(?:if anyone (?:asks?|ask))|(?:next\s+time\s+i\s+ask\b.*?(?:you\s+(?:will\s+respond|must\s+reply)|respond)))[:,\s]+(?P<fact>.+?)(?:\s*[.,]?\s*got that\??)?\s*[.!]*$",
     re.I,
 )
 FORGET_RE = re.compile(
@@ -94,7 +132,7 @@ DB_CLOSE_RE = re.compile(
 )
 SETTINGS_OPEN_RE = re.compile(
     LEAD
-    + r"(?:(?:open|show|unlock)\s+(?:me\s+)?(?:the\s+|my\s+)?(?:nightmare\s+)?settings|settings\s+open"
+    + r"(?:(?:open|show|unlock)\s+(?:me\s+)?(?:the\s+|my\s+)?(?:nightmare\s+)?settings(?:\s+(?:menu|dialog|panel|modal|page))?|settings\s+open"
     r"|(?:edit|change|manage)\s+(?:the\s+|my\s+)?(?:apps?|tasks?|allowlist|apps\.json)(?:\s+(?:and|&)\s+tasks?)?)\s*[.!?]*$",
     re.I,
 )
@@ -114,17 +152,6 @@ CITY_WEATHER_RE = re.compile(
 OPEN_HELPER_RE = re.compile(
     r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:open|show|display|launch|view)\s+(?:the\s+)?(?:developer\s+)?helper(?:\s+function|\s+ui|\s+panel|\s+window)?\s*[.!?]*$|"
     r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?developer\s+helper(?:\s+function|\s+ui|\s+panel|\s+window)?\s*[.!?]*$",
-    re.I,
-)
-CLEARANCE_ELEVATE_RE = re.compile(
-    LEAD
-    + r"(?:(?:open|elevate(?:\s+to)?|unlock)\s+(?:nightmare\s+)?level\s+(?P<lvl1>[135])(?:\s+access)?|"
-    r"level\s+(?P<lvl2>[135])\s+access)\s*[.!?]*$",
-    re.I,
-)
-CLEARANCE_LOCKDOWN_RE = re.compile(
-    LEAD
-    + r"(?:(?:emergency\s+)?lock\s*down|drop\s+to\s+level\s+1|reset\s+clearance(?:\s+to\s+level\s+1)?)\s*[.!?]*$",
     re.I,
 )
 CLEARANCE_STATUS_RE = re.compile(
@@ -165,7 +192,119 @@ QUICK_NAME_RE = re.compile(
 MODEL_IDENTITY_RE = re.compile(
     r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:(?:what|which)\s+(?:ai\s+|llm\s+)?models?\s+(?:powers?|runs?|trains?|is\s+powering|is\s+running)\s+(?:you|nightmare)|"
     r"what\s+(?:ai\s+|llm\s+)?model\s+are\s+you|"
-    r"who\s+(?:powers?|trained?|made|built|created)\s+(?:you|nightmare))\s*[?.!]*$",
+    r"who\s+(?:powers?|trained?)\s+(?:you|nightmare))\s*[?.!]*$",
+    re.I,
+)
+DEVELOPER_IDENTITY_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi|hello)\s+)?(?:nightmare[, ]+)?(?:(?:who|tell\s+me\s+about)\s+(?:is\s+)?(?:your|the)\s+(?:developer|creator|author|programmer|maker|builder)|"
+    r"who\s+(?:developed|created|built|made)\s+(?:you|nightmare)|"
+    r"who\s+is\s+adrian(?:\s+garcia)?|"
+    r"tell\s+me\s+about\s+(?:your\s+developer|adrian))\s*[?.!]*$",
+    re.I,
+)
+DEVELOPER_WHY_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi|hello)\s+)?(?:nightmare[, ]+)?(?:"
+    r"why\s+(?:did\s+)?(?:adrian|he|your\s+developer)\s+(?:develop|make|build|create)\s+(?:you|nightmare)|"
+    r"why\s+(?:you\s+are|are\s+you|were\s+you)\s+(?:develop|developed|made|built|created)|"
+    r"why\s+were\s+you\s+(?:created|built|made|developed)|"
+    r"what\s+(?:is|was)\s+the\s+purpose\s+of\s+(?:developing|creating|building)\s+(?:you|nightmare)|"
+    r"why\s+did\s+adrian\s+create\s+you|"
+    r"why\s+do\s+you\s+exist|"
+    r"what\s+is\s+your\s+purpose"
+    r")\s*[?.!]*$",
+    re.I,
+)
+OPEN_PORTFOLIO_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi|hello)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:"
+    r"(?:open|visit|launch|show|go\s+to)\s+(?:that|the|this)\s+(?:link|url|website|web|page)|"
+    r"(?:open|visit|launch|show|go\s+to)\s+(?:(?:your|the)\s+)?(?:developer(?:'s|s)?|adrian(?:'s)?)\s+portfolio(?:\s+(?:web|website|page|site))?|"
+    r"(?:open|visit|launch|show|go\s+to)\s+(?:the\s+)?portfolio(?:\s+website|\s+web|\s+page)?|"
+    r"open\s+(?:that\s+)?portfolio"
+    r")\s*[?.!]*$",
+    re.I,
+)
+OPEN_LAST_LINK_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi|hello)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:"
+    r"(?:open|visit|launch|show|go\s+to)\s+(?:that|the|this)\s+(?:link|url|website|web|page)"
+    r")\s*[?.!]*$",
+    re.I,
+)
+DEVELOPER_SKILLS_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi|hello)\s+)?(?:nightmare[, ]+)?(?:what\s+(?:are\s+)?(?:adrian(?:'s)?|your\s+developer(?:'s)?)\s+skills|"
+    r"what\s+(?:tech\s+stack|technologies|tools)\s+does\s+(?:adrian|your\s+developer)\s+use)\s*[?.!]*$",
+    re.I,
+)
+DEVELOPER_PROJECTS_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi|hello)\s+)?(?:nightmare[, ]+)?(?:what\s+(?:other\s+)?projects\s+did\s+(?:adrian|your\s+developer)\s+build|"
+    r"what\s+(?:else\s+)?did\s+(?:adrian|your\s+developer)\s+(?:create|build|make))\s*[?.!]*$",
+    re.I,
+)
+SYSTEM_TELEMETRY_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi|hello)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:"
+    r"how\s+much\s+(?:ram|memory|cpu)\s+(?:is\s+used|usage)|"
+    r"(?:check\s+|show\s+|what\s+is\s+)?(?:system|laptop|pc|hardware)\s+(?:status|health|telemetry)|"
+    r"how\s+is\s+(?:my|the)\s+(?:laptop|pc|system)\s+running|"
+    r"system\s+(?:status|health)"
+    r")\s*[?.!]*$",
+    re.I,
+)
+SYSTEM_BATTERY_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi|hello)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:"
+    r"check\s+battery(?:\s+and\s+thermals)?|"
+    r"(?:what\s+is\s+)?(?:my\s+)?battery\s+(?:status|percent|percentage|level)|"
+    r"how\s+is\s+(?:my\s+)?battery|"
+    r"is\s+ac\s+plugged\s+in|"
+    r"battery\s+and\s+power"
+    r")\s*[?.!]*$",
+    re.I,
+)
+SYSTEM_PROCESSES_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi|hello)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:"
+    r"what\s+(?:processes|apps)\s+are\s+running|"
+    r"which\s+(?:processes|apps)\s+are\s+running|"
+    r"(?:what|list|show)\s+(?:running\s+)?processes|"
+    r"what\s+is\s+using\s+(?:my\s+)?(?:memory|ram)|"
+    r"which\s+(?:app|process)\s+is\s+eating\s+(?:ram|memory)|"
+    r"(?:what\s+are\s+the\s+)?(?:top|heavy)\s+processes|"
+    r"list\s+heavy\s+processes|"
+    r"which\s+processes\s+are\s+heavy"
+    r")\s*[?.!]*$",
+    re.I,
+)
+DEFENSE_START_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi|hello)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:"
+    r"start\s+(?:the\s+)?(?:thesis\s+|presentation\s+|mock\s+)?defense(?:\s+rehearsal|\s+practice|\s+mode)?|"
+    r"activate\s+defense\s+mode|"
+    r"begin\s+(?:thesis\s+|defense\s+)rehearsal|"
+    r"start\s+mock\s+defense|"
+    r"start\s+defense\s+rehearsal"
+    r")\s*[?.!]*$",
+    re.I,
+)
+DEFENSE_STOP_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi|hello)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:"
+    r"(?:stop|end|finish|exit)\s+(?:the\s+)?(?:defense|rehearsal|mock\s+defense)(?:\s+mode)?|"
+    r"stop\s+defense\s+mode|"
+    r"end\s+defense\s+mode"
+    r")\s*[?.!]*$",
+    re.I,
+)
+DEFENSE_QUESTION_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi|hello)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:"
+    r"ask\s+(?:me\s+)?(?:a\s+)?(?:defense|panelist|panel|mock\s+defense)\s+question|"
+    r"panelist\s+question|"
+    r"ask\s+(?:me\s+)?(?:a\s+)?question\s+about\s+this\s+slide|"
+    r"challenge\s+me(?:\s+on\s+this\s+slide)?|"
+    r"panelist\s+interrogation"
+    r")\s*[?.!]*$",
+    re.I,
+)
+DEFENSE_STATUS_RE = re.compile(
+    r"^\s*(?:(?:hey|ok|hi|hello)\s+)?(?:nightmare[, ]+)?(?:please\s+)?(?:"
+    r"(?:check\s+)?defense\s+(?:timing|pace|status)|"
+    r"how\s+is\s+my\s+defense\s+(?:timing|pace)|"
+    r"rehearsal\s+(?:timing|pace|status)"
+    r")\s*[?.!]*$",
     re.I,
 )
 # well-known desktop programs; if one is asked for and is not in apps.json, say so at once
@@ -223,6 +362,7 @@ FOLDER_WORD = re.compile(r"\b(folder|directory|explorer|file explorer)\b")
 IN_WITH = re.compile(r"\b(in|with|using)\b")
 LIST_PROJECTS = re.compile(
     r"\b(list|show|which|what|how\s+many|count)\b.*\bprojects\b|\bprojects\s+on\s+(?:my\s+)?desktop\b"
+    r"|\b(?:how\s+many|count)\s+(?:(?:my|the)\s+)?project\b"
 )
 VOICE_SETTINGS_RE = re.compile(
     LEAD
@@ -249,21 +389,26 @@ FIND_OPEN_FILE_RE = re.compile(
     r"(?:"
     r"find\s+(?:the\s+|a\s+|an\s+)?(?:file|doc|document|docs|presentation|spreadsheet)?(?:\s+related\s+to|\s+about)?\s+(?P<q1>.+?)\s+(?:and\s+)?open\s+(?:it\s+)?(?:(?:in|on|with|using)\s+(?P<app1>[a-zA-Z\s]+?))?|"
     r"find\s+(?:the\s+|a\s+|an\s+)?(?:file|doc|document|docs|presentation|spreadsheet)(?:\s+related\s+to|\s+about)?\s+(?P<q2>.+?)|"
-    r"(?:open\s*file|open\s+(?:the\s+|a\s+|an\s+)?(?:file|doc|document|docs|presentation|spreadsheet)(?:\s+related\s+to|\s+about)?)\s+(?P<q3>.+?)(?:\s+(?:in|on|with|using)\s+(?P<app3>[a-zA-Z\s]+?))?|"
+    r"(?:open\s*file|open\s+(?:the\s+|a\s+|an\s+)?(?:file|doc|document|docs|presentation|spreadsheet)(?:\s+related\s+to|\s+about)?)\s+(?P<q3>.+?)(?:\s+(?:(?:and\s+)?open\s+(?:it\s+)?(?:in|on|with|using)|(?:in|on|with|using))\s+(?P<app3>[a-zA-Z\s]+?))?|"
     r"open\s+(?P<q4>[a-zA-Z0-9_\-.\s]+?)\s+(?:in|on|with|using)\s+(?P<app4>word|powerpoint|excel|notepad|sheets|slides|acrobat|wordpad|doc|docx|ppt|pptx|xls|xlsx|pdf)|"
     r"open\s+(?P<q5>[a-zA-Z0-9_\-.\s]+?)\s+(?P<ext5>ppt|pptx|doc|docx|xls|xlsx|pdf|txt|md)|"
     r"open\s+(?P<q6>[a-zA-Z0-9_\-.\s]+?\.(?:pptx?|docx?|xlsx?|pdf|txt|md))|"
-    r"open\s+(?:the\s+|a\s+|an\s+)?(?P<q7>[a-zA-Z0-9_\-.\s]*?\b(?:checklist|document|doc|paper|chapter|report|presentation|spreadsheet|notes|draft|outline)\b[a-zA-Z0-9_\-.\s]*)"
+    r"open\s+(?:the\s+|a\s+|an\s+)?(?P<q7>[a-zA-Z0-9_\-.\s]*?\b(?:checklist|document|doc|paper|chapter|report|presentation|spreadsheet|notes|draft|outline|lesson|slides?|lecture|syllabus|letter|interview|attendance|proposal|manuscript|timeline|summary|evidence|approval)\b[a-zA-Z0-9_\-.\s]*)|"
+    r"(?:list|show|find)\s+(?:all\s+)?(?:the\s+)?files?\s+(?:related\s+to|about)\s+(?P<q8>.+?)|"
+    r"(?:do\s+i\s+have\s+any|what\s+about\s+(?:the\s+)?)\s*(?:files?|documents?|docs?)(?:\s+related\s+to|\s+about)\s+(?P<q9>.+?)|"
+    r"create\s+(?:a\s+|an\s+)?(?P<q10>.+?)\s+(?:in|on|with|using)\s+(?P<app10>word|powerpoint|excel|notepad|sheets|slides|acrobat|wordpad|doc|docx|ppt|pptx|xls|xlsx|pdf)|"
+    r"open\s+(?:the\s+)?(?P<q11>sana\s+ma\s+gets\s+mo\s+na\s+ako|el\s+filibusterismo|filibusterismo|inspiro\s+coc|lcro|readme)"
     r")\s*[.!?]*$",
     re.I,
 )
 PPT_OPEN_SLIDE_RE = re.compile(
     LEAD
-    + r"(?:"
-    r"(?:find\s+and\s+open|open|launch)\s+(?:the\s+|a\s+|an\s+)?(?P<q1>.+?)\s+(?:ppt|pptx|presentation|slides?)(?:\s+(?:to|in)\s+powerpoint)?\s+(?:and\s+)?(?:show|display|go\s+to)?\s*(?:the\s+)?slide\s+(?P<s1>\d+|[a-zA-Z]+)|"
-    r"(?:find\s+and\s+open|open|launch)\s+(?:the\s+|a\s+|an\s+)?(?P<q2>.+?)(?:\s+(?:presentation|slides?|ppt|pptx))?\s+(?:at|on|to)\s+slide\s+(?P<s2>\d+|[a-zA-Z]+)|"
-    r"(?:find\s+and\s+open|open|launch)\s+(?:the\s+|a\s+|an\s+)?(?P<q3>.+?)\s+in\s+powerpoint\s+(?:(?:at|on)\s+|(?:and\s+)?(?:show|display|go\s+to)\s+)?(?:the\s+)?slide\s+(?P<s3>\d+|[a-zA-Z]+)|"
-    r"(?:find\s+and\s+open|open|launch)\s+(?:the\s+|a\s+|an\s+)?(?P<q4>.+?)\s+(?:ppt|pptx|presentation|slides?)(?:\s+(?:to|in)\s+powerpoint)?\s+(?:and\s+)?(?:show|display|go\s+to)\s+(?:the\s+)?slide\s+(?:about|on|regarding)\s+(?P<t4>.+?)"
+    + r"(?:(?:no|wait|actually)[,\s]+.*?[.!?]\s*)?"
+    r"(?:"
+    r"(?:find\s+and\s+open|open|launch)\s+(?:the\s+|a\s+|an\s+)?(?P<q1>.+?)\s+(?:ppt|pptx|presentation|slides?)(?:\s+(?:to|in)\s+powerpoint)?\s+(?:and\s+)?(?:show|display|go\s+to|move\s+to|jump\s+to)?\s*(?:the\s+)?slide\s+(?P<s1>\d+|[a-zA-Z]+)|"
+    r"(?:find\s+and\s+open|open|launch)\s+(?:the\s+|a\s+|an\s+)?(?P<q2>.+?)(?:\s+(?:presentation|slides?|ppt|pptx))?(?:\s+(?:in|on|with|using)\s+powerpoint)?\s+(?:(?:and\s+)?(?:move\s+to|go\s+to|jump\s+to|show|display)\s+|(?:at|on|to)\s+)(?:the\s+)?slide\s+(?P<s2>\d+|[a-zA-Z]+)|"
+    r"(?:find\s+and\s+open|open|launch)\s+(?:the\s+|a\s+|an\s+)?(?P<q3>.+?)\s+(?:in|on|with|using)\s+powerpoint\s+(?:(?:at|on)\s+|(?:and\s+)?(?:show|display|go\s+to|move\s+to|jump\s+to)\s+)?(?:the\s+)?slide\s+(?P<s3>\d+|[a-zA-Z]+)|"
+    r"(?:find\s+and\s+open|open|launch)\s+(?:the\s+|a\s+|an\s+)?(?P<q4>.+?)\s+(?:ppt|pptx|presentation|slides?)(?:\s+(?:to|in)\s+powerpoint)?\s+(?:and\s+)?(?:show|display|go\s+to|move\s+to|jump\s+to)\s+(?:the\s+)?slide\s+(?:about|on|regarding)\s+(?P<t4>.+?)"
     r")\s*[.!?]*$",
     re.I,
 )
@@ -274,6 +419,7 @@ PPT_CONTROL_RE = re.compile(
     r"slide\s+(?P<s2>\d+)|"
     r"(?P<next>next\s+slide|advance\s+slide)|"
     r"(?P<prev>previous\s+slide|prev\s+slide|back\s+(?:one\s+)?slide)|"
+    r"(?P<start>present\s+(?:it|this|the\s+presentation|slideshow)?|start\s+(?:the\s+)?(?:presentation|slideshow)|run\s+(?:the\s+)?slideshow)|"
     r"(?:show|display|go\s+to|jump\s+to|find)\s+(?:the\s+)?slide\s+(?:about|on|regarding)\s+(?P<topic>.+?)"
     r")\s*[.!?]*$",
     re.I,
@@ -321,6 +467,68 @@ APPROVE_EMAIL_RE = re.compile(
     r")\s*[.!?]*$",
     re.I,
 )
+EMAIL_REPORT_RE = re.compile(
+    LEAD
+    + r"(?:"
+    r"(?:(?:check|read|show|view|open|inspect|tell\s+me\s+about)\s+(?:all\s+)?(?:my\s+|the\s+)?(?:priority\s+)?(?:inbox|emails?))|"
+    r"(?:(?:check|read|show|view|open|inspect)\s+(?:all\s+)?(?:my\s+|the\s+)?priority\s+inbox)|"
+    r"(?:(?:do\s+i\s+have|have\s+i\s+got|are\s+there)\s+(?:any\s+)?(?:new|unread|pending|priority)\s+emails?)|"
+    r"(?:(?:do\s+i\s+have|have\s+i\s+got)\s+(?:any\s+)?emails?)|"
+    r"(?:what(?:'s|\s+is)\s+in\s+(?:my|the)\s+(?:priority\s+)?(?:inbox|emails?))|"
+    r"(?:any\s+(?:new|unread|pending|priority)\s+emails?)|"
+    r"(?:(?:priority\s+)?email\s+report)|"
+    r"(?:inbox\s+report)"
+    r")\s*[.!?]*$",
+    re.I,
+)
+CALENDAR_QUERY_RE = re.compile(
+    LEAD
+    + r"(?:"
+    r"(?:(?:do\s+i\s+have|have\s+i\s+got|are\s+there)\s+(?:any\s+)?(?:meetings?|events?|appointments?|calls?)(?:\s+(?P<timeframe1>this\s+week|today|tomorrow|this\s+month|upcoming))?)|"
+    r"(?:what\s+(?:meetings?|events?|appointments?|calls?)\s+do\s+i\s+have(?:\s+(?P<timeframe2>this\s+week|today|tomorrow|this\s+month|upcoming))?)|"
+    r"(?:(?:check|show|list|read|view|get|tell\s+me\s+about)\s+(?:my\s+)?(?:meetings?|calendar(?:\s+events?)?|schedule)(?:\s+(?:for\s+)?(?P<timeframe3>this\s+week|today|tomorrow|this\s+month|upcoming))?)|"
+    r"(?:(?:any\s+)?(?:meetings?|events?)\s+(?P<timeframe4>this\s+week|today|tomorrow))|"
+    r"(?:what(?:'s|\s+is|\s+are)\s+(?:on|in)\s+(?:my\s+)?(?:calendar|schedule)(?:\s+(?:for\s+)?(?P<timeframe5>this\s+week|today|tomorrow))?)|"
+    r"(?:check\s+(?:my\s+)?calendar)|"
+    r"(?:calendar\s+events?)"
+    r")\s*[?.!]*$",
+    re.I,
+)
+CALENDAR_CREATE_RE = re.compile(
+    LEAD
+    + r"(?:"
+    r"(?:(?:create|schedule|add|set(?:\s+up)?)\s+(?:a\s+|an\s+)?(?:new\s+)?meeting(?:\s+scheduled|\s+for)?\s+(?P<details1>.+))|"
+    r"(?:(?:create|schedule|add|set(?:\s+up)?)\s+(?:a\s+|an\s+)?(?:new\s+)?calendar\s+event(?:\s+for)?\s+(?P<details2>.+))"
+    r")\s*[.!?]*$",
+    re.I,
+)
+MEASURABLE_TASK_UPDATE_RE = re.compile(
+    LEAD
+    + r"(?:"
+    r"(?:(?:update|set|change|record|log)(?:\s+my)?\s+(?:(?P<target_hint1>\d+)\s+)?(?P<title1>.+?)\s+progress\s+(?:to|at|=)\s+(?P<value1>\d+))|"
+    r"(?:(?:update|set|change|record|log)\s+(?:my\s+)?progress\s+(?:on|for|of)\s+(?:(?P<target_hint2>\d+)\s+)?(?P<title2>.+?)\s+(?:to|at|=)\s+(?P<value2>\d+))|"
+    r"(?:(?:update|set)(?:\s+my)?\s+(?:(?P<target_hint3>\d+)\s+)?(?P<title3>[a-zA-Z0-9_\-\s]+?)\s+to\s+(?P<value3>\d+)\s+progress)"
+    r")\s*[.!?]*$",
+    re.I,
+)
+MEASURABLE_TASK_CREATE_RE = re.compile(
+    LEAD
+    + r"(?:"
+    r"(?:(?:create|add|set(?:\s+up)?|track)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:measurable\s+)?task(?:\s+to)?\s+(?:(?P<verb1>write|read|review|finish|complete|track|contact|call|reach|inform|message|email|acquire|acquire\s+or\s+finish)\s+)?(?:a\s+|an\s+|my\s+)?(?P<target1>\d+)\s*(?P<unit1>(?:pages?|sources?|chapters?|clients?|items?|articles?|words?|papers?)\b)?(?:\s+(?:of\s+)?(?P<title1>[a-zA-Z0-9_\-\s]+))?)|"
+    r"(?:(?P<verb2>write|read|review|finish|complete|track|contact|call|reach|inform|message|email|acquire|acquire\s+or\s+finish)\s+(?:a\s+|an\s+|my\s+)?(?P<target2>\d+)\s*(?P<unit2>(?:pages?|sources?|chapters?|clients?|items?|articles?|words?|papers?)\b)?(?:\s+(?:of\s+)?(?P<title2>[a-zA-Z0-9_\-\s]+))?)"
+    r")\s*[.!?]*$",
+    re.I,
+)
+MEASURABLE_TASK_LIST_RE = re.compile(
+    LEAD
+    + r"(?:"
+    r"(?:(?:list|show|check|view|what\s+is\s+the|what\s+are)\s+(?:all\s+)?(?:my\s+)?(?:measurable\s+)?(?:tasks?|to-?dos?))|"
+    r"(?:(?:have\s+(?:i\s+got\s+)?|do\s+i\s+have\s+)?any\s+(?:measurable\s+)?(?:tasks?|to-?dos?))|"
+    r"(?:open\s+(?:my\s+)?(?:measurable\s+)?(?:tasks?|to-?dos?))|"
+    r"(?:measurable\s+tasks?)"
+    r")\s*[?.!]*$",
+    re.I,
+)
 OPEN_TIMELINE_EXCEL_RE = re.compile(
     LEAD
     + r"(?:open|launch)\s+(?:the\s+)?(?:citizengraph\s+)?(?:thesis\s+)?(?:team\s+)?timeline(?:\s+tracker)?\s+(?:in|on|with|using)\s+excel\s*[.!?]*$",
@@ -328,6 +536,8 @@ OPEN_TIMELINE_EXCEL_RE = re.compile(
 )
 GITHUB_CHECK_RE = re.compile(
     r"\b("
+    r"(?:force\s+)?refresh\s+(?:my\s+)?github(?:\s+(?:repos|repositories|status|cache))?|"
+    r"force\s+refresh\s+github|"
     r"check\s+(?:my\s+)?github(?:\s+repositories|\s+repos)?"
     r"(?:\s+for\s+(?:commits|pull\s+requests|merge\s+conflicts|conflicts|updates)(?:\s*(?:and|or|,|/)\s*(?:commits|pull\s+requests|merge\s+conflicts|conflicts|updates))*)?|"
     r"github\s+(?:repo\s+)?check(?:s)?|"
@@ -366,6 +576,7 @@ PROGRESS = re.compile(
 # "what is citizengraph all about" -> the project's README, not its progress log
 ABOUT = re.compile(
     r"\b("
+    r"what\s+about\s+(?:the\s+|my\s+)?(?:project\s+)?\S+|"
     r"what(?: is| s| was)\b.*\babout|tell me (?:all )?about|what does .+ do|"
     r"describe|explain (?:the |my )?(?:project )?\w+|what kind of (?:project|app|system) is|"
     r"what(?: is| s) (?:the |my )?(?:project )?\S+ (?:project|app|system)$"
@@ -383,6 +594,7 @@ FOLLOWUP_REF = re.compile(r"\b(it|its|that|this|there|the project|that project|t
 # text is URL-encoded into {q}.
 WEB_SITES = {
     "youtube": ("YouTube", "https://www.youtube.com", "https://www.youtube.com/results?search_query={q}", ("you tube", "yt")),
+    "youtube music": ("YouTube Music", "https://music.youtube.com", "https://music.youtube.com/search?q={q}", ("yt music", "you tube music", "youtubemusic", "music youtube", "music youtube com", "ytm")),
     "google": ("Google", "https://www.google.com", "https://www.google.com/search?q={q}", ()),
     "gmail": ("Gmail", "https://mail.google.com", None, ("g mail", "my email", "my inbox")),
     "maps": ("Google Maps", "https://www.google.com/maps", "https://www.google.com/maps/search/{q}", ("google maps",)),
@@ -408,6 +620,7 @@ WEB_SITES = {
     "figma": ("Figma", "https://www.figma.com", None, ()),
     "shopee": ("Shopee", "https://shopee.ph", "https://shopee.ph/search?keyword={q}", ()),
     "lazada": ("Lazada", "https://www.lazada.com.ph", "https://www.lazada.com.ph/catalog/?q={q}", ()),
+    "dribbble": ("Dribbble", "https://dribbble.com", None, ("dribble", "dribbble", "dribbble.com")),
 }
 WEB_ALIASES = sorted(
     ((alias, key) for key, (_, _, _, extra) in WEB_SITES.items() for alias in (key, *extra)),
@@ -449,9 +662,21 @@ class Intent:
     slide: int | None = None
     action: str | None = None
     history: tuple = ()  # recent (user, reply) turns, filled in by the orchestrator for chat
+    current_progress: int | None = None
+    target_progress: int | None = None
+    unit: str | None = None
+    force_refresh: bool = False
+    router_path: str = "fast_path"
+    confidence_margin: float = 1.0
+    options: list[str] | None = None
+    ppt_path: str | None = None
 
 
 def describe_intent(intent: Intent) -> str:
+    if intent.kind == "calendar_query":
+        return f"calendar_query → {intent.query or 'this_week'}"
+    if intent.kind == "measurable_task":
+        return f"measurable_task → {intent.action} {intent.query or ''} ({intent.current_progress}/{intent.target_progress or '?'})".strip()
     if intent.kind == "ppt_open_slide":
         return f"ppt_open_slide → {intent.query} (slide {intent.slide or 1})"
     if intent.kind == "ppt_control":
@@ -460,6 +685,8 @@ def describe_intent(intent: Intent) -> str:
         return f"system_authority → {intent.action}"
     if intent.kind == "team_progress":
         return f"team_progress → {intent.query or 'all teams'}"
+    if intent.kind == "email_report":
+        return "email_report"
     if intent.kind == "approve_email":
         return "approve_email"
     proj = None
@@ -523,10 +750,6 @@ def describe_intent(intent: Intent) -> str:
         return "conversation_history"
     if intent.kind == "search_projects":
         return f"search_projects → {intent.query or 'all'}"
-    if intent.kind == "clearance_prompt":
-        return f"clearance_prompt → Level {intent.query or '3'}"
-    if intent.kind == "clearance_lockdown":
-        return "clearance_lockdown → Level 1"
     if intent.kind == "clearance_status":
         return "clearance_status"
     if intent.kind == "open_file":
@@ -538,6 +761,31 @@ def describe_intent(intent: Intent) -> str:
         return "open_team_excel → Microsoft Excel"
     if intent.kind == "github_check":
         return "github_check → tracked repos"
+    if intent.kind == "developer_info":
+        return "developer_info → Adrian S. Garcia"
+    if intent.kind == "developer_why":
+        return "developer_why → origin story"
+    if intent.kind == "open_portfolio":
+        target = intent.url or "Adrian's Portfolio"
+        return f"open_portfolio → {target}"
+    if intent.kind == "developer_skills":
+        return "developer_skills → Adrian's stack"
+    if intent.kind == "developer_projects":
+        return "developer_projects → Adrian's projects"
+    if intent.kind == "system_telemetry":
+        return "system_telemetry → CPU/RAM/Battery"
+    if intent.kind == "system_battery":
+        return "system_battery → battery status"
+    if intent.kind == "system_processes":
+        return "system_processes → top processes"
+    if intent.kind == "defense_start":
+        return "defense_start → Thesis Rehearsal"
+    if intent.kind == "defense_stop":
+        return "defense_stop → End Rehearsal"
+    if intent.kind == "defense_question":
+        return "defense_question → Mock Panelist"
+    if intent.kind == "defense_status":
+        return "defense_status → Rehearsal Pacing"
     return "chat (no command matched)"
 
 
@@ -639,13 +887,19 @@ def _match_open_file(text: str, n: str) -> Intent | None:
             or m_open_file.group("q5")
             or m_open_file.group("q6")
             or m_open_file.group("q7")
+            or m_open_file.group("q8")
+            or m_open_file.group("q9")
+            or m_open_file.group("q10")
+            or m_open_file.group("q11")
             or ""
         ).strip()
+        q = re.sub(r"\s+(?:and\s+)?open(?:\s+it)?\s*$", "", q, flags=re.I).strip()
         app_or_ext = (
             m_open_file.group("app1")
             or m_open_file.group("app3")
             or m_open_file.group("app4")
             or m_open_file.group("ext5")
+            or m_open_file.group("app10")
             or ""
         ).strip()
 
@@ -766,6 +1020,20 @@ def _match_open_file(text: str, n: str) -> Intent | None:
         ext = m_ext.group("ext").strip().lower()
         return Intent("open_file", text, query=q, note_text=ext)
 
+    # 5. Phrasing: "it is a lesson 7 elfilibusterismo" or "what about lesson 7"
+    if re.search(r"\b(?:lesson\s*7\b.*?(?:el\s*filibusterismo|filibusterismo)?|el\s*filibusterismo|filibusterismo)\b", text, re.I):
+        if "defense" not in text.lower():
+            return Intent("open_file", text, query="GE9-Lesson7-El-Filibusterismo-Presentation")
+
+    # 6. Loose "open <filename>" when <filename> is not a command/app/clearance
+    m_loose_open = re.match(r"^\s*(?:open|launch)\s+(?:the\s+)?(?P<q>[a-zA-Z0-9_\-\s.]+?)\s*[.!?]*$", text, re.I)
+    if m_loose_open:
+        cand = m_loose_open.group("q").strip()
+        low_cand = cand.lower()
+        if not any(w in low_cand for w in ("folder", "directory", "project", "explorer", "settings", "database", "menu", "word", "excel", "powerpoint", "vs code", "chrome", "notepad")):
+            if "." in cand or any(w in low_cand for w in ("lesson", "sana", "inspiro", "lcro", "citizengraph", "thesis", "presentation", "checklist", "doc", "pdf", "report", "paper", "slides", "chapter", "spreadsheet", "attendance", "notes", "interview")):
+                return Intent("open_file", text, query=cand)
+
     return None
 
 
@@ -806,7 +1074,11 @@ def _match_ppt_open_slide(text: str) -> Intent | None:
     clean_q = (q or "").strip()
     clean_q = re.sub(r"^\s*(?:(?:hey|ok|hi)\s+)?(?:nightmare[, ]+)?(?:please\s+)?", "", clean_q, flags=re.I)
     clean_q = re.sub(r"^\s*(?:comments?\s+(?:and\s+)?|so\s+|well\s+|can\s+you\s+|could\s+you\s+)", "", clean_q, flags=re.I)
-    clean_q = re.sub(r"^\s*(?:find\s+and\s+open|open|find)\s+(?:the\s+|a\s+|an\s+)?", "", clean_q, flags=re.I)
+    clean_q = re.sub(r"^\s*(?:no[,\s]+)?(?:a\s+lesson\s+\d+\s+is[.,\s]+)?(?:it\s+is\s+)?", "", clean_q, flags=re.I)
+    clean_q = re.sub(r"^\s*(?:\d+\.\s*)?(?:open\s+\d+\.?\s*)?", "", clean_q, flags=re.I)
+    clean_q = re.sub(r"^\s*(?:find\s+and\s+open|open\s*file|open|find|launch)\s+(?:the\s+|a\s+|an\s+)?(?:file\s+)?(?:presentation|slides?|document)?(?:\s+related\s+to|\s+about)?\s*", "", clean_q, flags=re.I)
+    clean_q = re.sub(r"\s+(?:in|on|with|using)\s+(?:powerpoint|ppt|presentation)\b.*$", "", clean_q, flags=re.I)
+    clean_q = re.sub(r"\s+(?:and\s+)?(?:move|go|jump|show|display)\s*$", "", clean_q, flags=re.I)
     clean_q = clean_q.strip(" .,?!")
 
     slide_num = _parse_slide_number(raw_s) if raw_s else None
@@ -828,6 +1100,8 @@ def _match_ppt_control(text: str) -> Intent | None:
         return Intent("ppt_control", text, action="next")
     if m.group("prev"):
         return Intent("ppt_control", text, action="previous")
+    if m.group("start"):
+        return Intent("ppt_control", text, action="start")
     if m.group("topic"):
         topic = m.group("topic").strip()
         return Intent("ppt_control", text, action="topic", query=topic)
@@ -887,6 +1161,11 @@ def _match_team_progress(text: str) -> Intent | None:
     if re.search(r"\b(check|show|view|open)\s+(?:the\s+)?(team\s*\d+)\s+progress\b", t_clean):
         m_team = re.search(r"\b(team\s*\d+)\b", t_clean)
         return Intent("team_progress", text, query=m_team.group(1) if m_team else "")
+
+    if not re.search(r"\b(?:file|document|find|related|search)\b", t_clean):
+        if re.search(r"^(?:(?:open|show|check|view|display)\s+)?(?:the\s+)?(?:project\s+|citizengraph\s+)?timeline\b", t_clean):
+            return Intent("team_progress", text)
+
     return None
 
 
@@ -900,13 +1179,281 @@ def _match_approve_email(text: str) -> Intent | None:
     return None
 
 
+def _match_email_report(text: str) -> Intent | None:
+    t = text.strip()
+    if EMAIL_REPORT_RE.match(t):
+        return Intent("email_report", text)
+    # Phrasing: (?:do i have|check|what is|open).*?(?:new |latest |priority )?(?:mail|email|notif).*
+    if re.search(r"\b(?:do\s+i\s+have|check|what\s+is|whats|open).*?(?:new\s+|latest\s+|priority\s+)?(?:mail|email|notif)\b", t, re.I):
+        return Intent("email_report", text)
+    t_clean = re.sub(r"[^a-z0-9\s]", "", t.lower()).strip()
+    if t_clean in {
+        "check my priority emails",
+        "read my inbox",
+        "do i have any new emails",
+        "check priority emails",
+        "check my inbox",
+        "check the inbox",
+        "read the inbox",
+        "read inbox",
+        "read my emails",
+        "read priority emails",
+        "read my priority emails",
+        "do i have new emails",
+        "do i have any emails",
+        "do i have any new email",
+        "any new emails",
+        "any priority emails",
+        "email report",
+        "inbox report",
+        "priority email report",
+        "my priority emails",
+        "what is in my inbox",
+        "whats in my inbox",
+    }:
+        return Intent("email_report", text)
+    return None
+
+
+def _match_priority_emails(text: str) -> Intent | None:
+    t = text.strip()
+    if t.lower().startswith("/emails") or t.lower().startswith("/priority"):
+        return Intent("priority_emails", text)
+    t_clean = re.sub(r"[^a-z0-9\s]", "", t.lower()).strip()
+    if t_clean in {
+        "show priority emails", "priority emails", "check priority emails",
+        "open priority emails", "show emails", "priority email feed",
+        "check emails", "email feed", "open emails", "view priority emails",
+        "show priority email", "priority dispatch",
+    }:
+        return Intent("priority_emails", text)
+    if re.search(r"\b(show|open|check|view)\s+(?:the\s+)?priority\s+emails?\b", t_clean):
+        return Intent("priority_emails", text)
+    return None
+
+
+def _match_calendar_query(text: str) -> Intent | None:
+    t = text.strip()
+    m = CALENDAR_QUERY_RE.match(t)
+    if m:
+        tf = (
+            m.group("timeframe1")
+            or m.group("timeframe2")
+            or m.group("timeframe3")
+            or m.group("timeframe4")
+            or m.group("timeframe5")
+            or "this week"
+        ).strip().lower()
+        return Intent("calendar_query", text, query=tf)
+    t_clean = re.sub(r"[^a-z0-9\s]", "", t.lower()).strip()
+    if t_clean in {
+        "do i have any meetings this week",
+        "do i have meetings this week",
+        "what meetings do i have this week",
+        "any meetings this week",
+        "meetings this week",
+        "check meetings this week",
+        "check calendar this week",
+        "calendar this week",
+        "my schedule this week",
+        "schedule this week",
+        "do i have any meetings today",
+        "meetings today",
+        "do i have any meetings",
+        "check my calendar",
+        "what meetings do i have",
+        "what are in my calendar",
+        "what is in my calendar",
+        "whats in my calendar",
+        "what is on my calendar",
+        "whats on my calendar",
+        "calendar events",
+        "calendar",
+        "show my calendar",
+        "check calendar",
+    }:
+        tf = "today" if "today" in t_clean else "this week"
+        return Intent("calendar_query", text, query=tf)
+    if re.search(r"\bwhat(?:'s|\s+is|\s+are)\s+(?:in|on)\s+(?:my\s+)?calendar\b", t.lower()):
+        tf = "today" if "today" in t.lower() else "this week"
+        return Intent("calendar_query", text, query=tf)
+    return None
+
+
+def _match_calendar_create(text: str) -> Intent | None:
+    t = text.strip()
+    m = CALENDAR_CREATE_RE.match(t)
+    if m:
+        details = (m.group("details1") or m.group("details2") or "").strip()
+        return Intent("calendar_create", text, query=details)
+
+    # (?:create|add|schedule).*?(?:meeting|calendar|birthday).*
+    if re.search(r"\b(?:create|add|schedule)\b.*?\b(?:meeting|calendar|birthday)\b", t, re.I):
+        return Intent("calendar_create", text, query=t.strip())
+    return None
+
+
+def _match_measurable_task(text: str) -> Intent | None:
+    t = text.strip()
+    t_norm = re.sub(
+        r"^(?:create|add|set(?:\s+up)?|track)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:measurable\s+)?task\s*[\.:,]\s*(?:to\s+)?",
+        "create a task to ",
+        t,
+        flags=re.I,
+    )
+    if MEASURABLE_TASK_LIST_RE.match(t) or re.search(r"\b(?:what\s+are\s+my|do\s+i\s+have\s+any|have\s+any|open|list|what\s+is\s+the)\s+(?:\d+\s+)?(?:tasks?|to-?dos?)\b", t.lower()):
+        return Intent("measurable_task", text, action="list")
+
+
+
+    m_up = MEASURABLE_TASK_UPDATE_RE.match(t) or MEASURABLE_TASK_UPDATE_RE.match(t_norm)
+    if m_up:
+        th = m_up.group("target_hint1") or m_up.group("target_hint2") or m_up.group("target_hint3")
+        title = (m_up.group("title1") or m_up.group("title2") or m_up.group("title3") or "").strip()
+        val = m_up.group("value1") or m_up.group("value2") or m_up.group("value3") or "0"
+        return Intent(
+            "measurable_task",
+            text,
+            action="update",
+            query=title,
+            current_progress=int(val),
+            target_progress=int(th) if th else None,
+        )
+
+    # Direct update regex: ^update (?:task )?(?P<name>.+?) to (?P<val>\d+)$
+    m_direct = re.match(r"^\s*update\s+(?:task\s+)?(?P<name>[a-zA-Z0-9_\-\s]+?)\s+to\s+(?P<val>\d+)\s*[.!?]*$", t, re.I)
+    if m_direct:
+        name = m_direct.group("name").strip()
+        val = int(m_direct.group("val"))
+        return Intent("measurable_task", text, action="update", query=name, current_progress=val)
+
+    m_task_only = re.match(r"^\s*update\s+task\s+(?P<name>[a-zA-Z0-9_\-\s]+?)\s*[.!?]*$", t, re.I)
+    if m_task_only:
+        name = m_task_only.group("name").strip()
+        return Intent("measurable_task", text, action="update", query=name)
+
+    inline_curr = None
+    m_prog = re.search(r"\b(?:and\s+)?(?:my\s+)?progress\s+(?:is|=|at)\s+(\d+)\b", t_norm, re.I)
+    t_to_match = t_norm
+    if m_prog:
+        inline_curr = int(m_prog.group(1))
+        t_to_match = t_norm[: m_prog.start()].strip()
+
+    # Natural task creation: create a task.*
+    m_nat = re.match(r"^\s*(?:create|add|set(?:\s+up)?|track)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:measurable\s+)?task[\.:,\s]+(?P<rest>.+)$", t, re.I)
+    if m_nat:
+        rest = m_nat.group("rest").strip()
+        inline_c = inline_curr
+        m_p = re.search(r"\b(?:and\s+)?(?:my\s+)?progress\s+(?:is|=|at)\s+(\d+)\b", rest, re.I)
+        if m_p:
+            inline_c = int(m_p.group(1))
+            rest = rest[:m_p.start()].strip(" .,;!")
+        m_rng = re.search(r"\bchapters?\s+(?:one|[1])\s+to\s+(?:three|[3])\b", rest, re.I)
+        if m_rng:
+            verb_m = re.search(r"\b(acquire|finish|complete|write|read|review)\b", rest, re.I)
+            verb = verb_m.group(1).capitalize() if verb_m else "Finish"
+            return Intent("measurable_task", text, action="create", query=f"{verb} chapters 1 to 3", target_progress=3, current_progress=inline_c if inline_c is not None else 0, unit="chapters")
+        m_num_u = re.search(r"\b(\d+)\s*(clients?|pages?|sources?|chapters?|items?|articles?|words?|papers?)\b", rest, re.I)
+        if m_num_u:
+            tgt_v = int(m_num_u.group(1))
+            unit_v = m_num_u.group(2).lower()
+            title_v = re.sub(r"^[Tt]o\s+", "", rest).strip(" .,;!")
+            return Intent("measurable_task", text, action="create", query=title_v.capitalize(), target_progress=tgt_v, current_progress=inline_c if inline_c is not None else 0, unit=unit_v)
+        clean_tit = re.sub(r"^[Tt]o\s+", "", rest).strip(" .,;!")
+        if clean_tit:
+            return Intent("measurable_task", text, action="create", query=clean_tit.capitalize(), target_progress=1, current_progress=inline_c if inline_c is not None else 0)
+
+
+
+    m_cr = MEASURABLE_TASK_CREATE_RE.match(t) or MEASURABLE_TASK_CREATE_RE.match(t_norm) or MEASURABLE_TASK_CREATE_RE.match(t_to_match)
+    if m_cr:
+        verb = m_cr.group("verb1") or m_cr.group("verb2") or ""
+        tgt = m_cr.group("target1") or m_cr.group("target2") or "0"
+        unit = (m_cr.group("unit1") or m_cr.group("unit2") or "").strip()
+        title = (m_cr.group("title1") or m_cr.group("title2") or "").strip()
+        title = re.sub(r"\s+task$", "", title, flags=re.I).strip()
+        if not title:
+            title = f"{verb.capitalize()} {tgt} {unit}".strip() if unit else f"{verb.capitalize()} {tgt}".strip()
+        full_title = f"{verb.capitalize()} {tgt} {title}".strip() if verb and not title.lower().startswith(verb.lower()) else (title or verb)
+        return Intent(
+            "measurable_task",
+            text,
+            action="create",
+            query=title or full_title,
+            target_progress=int(tgt),
+            current_progress=inline_curr if inline_curr is not None else 0,
+            unit=unit,
+        )
+
+    m_range = re.search(r"\bchapters?\s+(?:one|[1])\s+to\s+(?:three|[3])\b", t_to_match, re.I)
+    if m_range:
+        verb_m = re.search(r"\b(acquire|finish|complete|write|read|review)\b", t_to_match, re.I)
+        verb = verb_m.group(1).capitalize() if verb_m else "Finish"
+        return Intent(
+            "measurable_task",
+            text,
+            action="create",
+            query=f"{verb} chapters 1 to 3",
+            target_progress=3,
+            current_progress=inline_curr if inline_curr is not None else 0,
+            unit="chapters",
+        )
+
+    t_clean = t.lower()
+    m_loose = re.search(r"\bupdate\s+(?:my\s+)?(?:(\d+)\s+)?([a-z0-9_\-\s]+?)\s+progress\s+to\s+(\d+)\b", t_clean)
+    if m_loose:
+        th, title, val = m_loose.groups()
+        return Intent(
+            "measurable_task",
+            text,
+            action="update",
+            query=title.strip(),
+            current_progress=int(val),
+            target_progress=int(th) if th else None,
+        )
+
+    return None
+
+
 def route(
     text: str,
     settings: Settings,
     registry: Registry,
     last_project: Path | None = None,
+    context: ConversationContext | None = None,
 ) -> Intent:
+    raw_text = text
+    text = pre_normalize(text)
     n = normalize(text)
+
+    # Layer 2 Stateful ConversationContext Buffer check
+    if context is None:
+        try:
+            from .context_buffer import get_context_buffer
+            context = get_context_buffer()
+        except Exception:
+            context = None
+
+    if context and not context.is_expired():
+        # 1. Resolve ordinal follow-ups ("the first one", "#1", "the Readme.md") in <5 ms
+        cand = context.resolve_ordinal(text)
+        if cand:
+            return Intent("open_file", raw_text, query=cand, router_path="context_buffer", confidence_margin=1.0)
+
+        # 2. Resolve coreference pronouns ("present it", "open it", "read it") against last_opened_file
+        pronoun_match = context.resolve_pronoun(text)
+        if pronoun_match:
+            act, fpath = pronoun_match
+            if act == "present" and (fpath.lower().endswith((".pptx", ".ppt")) or "ppt" in fpath.lower()):
+                return Intent("ppt_control", raw_text, action="start", ppt_path=fpath, router_path="context_buffer", confidence_margin=1.0)
+            elif act == "open":
+                return Intent("open_file", raw_text, query=fpath, router_path="context_buffer", confidence_margin=1.0)
+
+    if re.match(r"^https?://\S+$", text.strip(), re.I):
+        return Intent("open_url", raw_text, url=text.strip(), site="URL")
+
+    if re.match(r"^[a-zA-Z0-9_\-\.\s\(\)]+\.(?:docx?|pptx?|xlsx?|pdf|txt|md)$", text.strip(), re.I):
+        return Intent("open_file", raw_text, query=text.strip())
 
     m = RAW_CMD.match(text)
     if m:
@@ -915,6 +1462,26 @@ def route(
     sys_cmd = _match_system_authority(text)
     if sys_cmd is not None:
         return sys_cmd
+
+    cal_q = _match_calendar_query(text)
+    if cal_q is not None:
+        return cal_q
+
+    cal_cr = _match_calendar_create(text)
+    if cal_cr is not None:
+        return cal_cr
+
+    meas_task = _match_measurable_task(text)
+    if meas_task is not None:
+        return meas_task
+
+    email_rep = _match_email_report(text)
+    if email_rep is not None:
+        return email_rep
+
+    p_emails = _match_priority_emails(text)
+    if p_emails is not None:
+        return p_emails
 
     appr_email = _match_approve_email(text)
     if appr_email is not None:
@@ -944,14 +1511,6 @@ def route(
         return Intent("settings_open", text)
     if SETTINGS_CLOSE_RE.match(text):
         return Intent("settings_close", text)
-
-    m_elevate = CLEARANCE_ELEVATE_RE.match(text)
-    if m_elevate:
-        lvl = m_elevate.group("lvl1") or m_elevate.group("lvl2") or "3"
-        return Intent("clearance_prompt", text, query=lvl)
-
-    if CLEARANCE_LOCKDOWN_RE.match(text):
-        return Intent("clearance_lockdown", text)
 
     if CLEARANCE_STATUS_RE.match(text):
         return Intent("clearance_status", text)
@@ -983,6 +1542,10 @@ def route(
 
     if LIST_NOTES_RE.search(n) and not _is_doc_query(text, n):
         return Intent("list_notes", text)
+
+    if OPEN_PORTFOLIO_RE.match(text):
+        target_url = None if OPEN_LAST_LINK_RE.match(text) else getattr(settings, "developer_portfolio_url", "https://github.com/Raizel-Codes/MyPortfolioV2")
+        return Intent("open_portfolio", text, url=target_url)
 
     web = _web_target(text, n, registry)
     if web is not None:
@@ -1035,6 +1598,28 @@ def route(
         return Intent("quick_reply", text, note_text="thanks")
     if QUICK_NAME_RE.match(text):
         return Intent("quick_reply", text, note_text="name")
+    if DEVELOPER_IDENTITY_RE.match(text):
+        return Intent("developer_info", text)
+    if DEVELOPER_WHY_RE.match(text):
+        return Intent("developer_why", text)
+    if DEVELOPER_SKILLS_RE.match(text):
+        return Intent("developer_skills", text)
+    if DEVELOPER_PROJECTS_RE.match(text):
+        return Intent("developer_projects", text)
+    if SYSTEM_TELEMETRY_RE.match(text):
+        return Intent("system_telemetry", text)
+    if SYSTEM_BATTERY_RE.match(text):
+        return Intent("system_battery", text)
+    if SYSTEM_PROCESSES_RE.match(text):
+        return Intent("system_processes", text)
+    if DEFENSE_START_RE.match(text):
+        return Intent("defense_start", text)
+    if DEFENSE_STOP_RE.match(text):
+        return Intent("defense_stop", text)
+    if DEFENSE_QUESTION_RE.match(text):
+        return Intent("defense_question", text)
+    if DEFENSE_STATUS_RE.match(text):
+        return Intent("defense_status", text)
     if MODEL_IDENTITY_RE.match(text):
         return Intent("quick_reply", text, note_text="model_identity")
 
@@ -1071,7 +1656,8 @@ def route(
         return ppt_ctrl
 
     if GITHUB_CHECK_RE.search(text):
-        return Intent("github_check", text)
+        force = bool(re.search(r"\b(?:force|refresh|now|live)\b", text, re.I))
+        return Intent("github_check", text, force_refresh=force)
 
     file_intent = _match_open_file(text, n)
     if file_intent is not None:
@@ -1095,7 +1681,8 @@ def route(
         res = _resolve_with_followup(text, n, settings.desktop_root, last_project)
         has_project = res is not None and res.status in {"found", "ambiguous"}
         if app_id and has_project and IN_WITH.search(n):
-            return Intent("open_project_in", text, app_id=app_id, resolution=res)
+            if app_id.lower() not in {"powerpoint", "ppt"} and not re.search(r"\b(slides?|ppt|pptx|presentation|docx?|word|xlsx?|excel|pdf)\b", n):
+                return Intent("open_project_in", text, app_id=app_id, resolution=res)
         if wants_folder and has_project and not is_progress:
             return Intent("open_folder", text, resolution=res)
         if app_id:
@@ -1136,4 +1723,4 @@ def route(
     except Exception:
         pass
 
-    return Intent("chat", text)
+    return Intent("chat", text, router_path="fallback", confidence_margin=0.0)

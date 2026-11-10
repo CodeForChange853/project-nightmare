@@ -32,7 +32,6 @@ def llm():
 @pytest.fixture
 def client(settings, llm):
     c = TestClient(create_app(settings, llm), base_url="http://127.0.0.1:8000")
-    c.post("/api/clearance/elevate", json={"level": 5, "secret": TOKEN}, headers=HDR)
     return c
 
 
@@ -156,7 +155,6 @@ def test_raw_command_enabled_still_needs_confirmation(settings, llm):
     from dataclasses import replace
 
     c = TestClient(create_app(replace(settings, allow_raw_commands=True), llm), base_url="http://127.0.0.1:8000")
-    c.post("/api/clearance/elevate", json={"level": 5, "secret": TOKEN}, headers=HDR)
     body = chat(c, "run command git status").json()
     assert body["needs_confirm"] and "git status" in body["action_label"]
 
@@ -416,7 +414,6 @@ def test_database_viewer_needs_pin_and_closes(settings, llm):
     s = replace(settings, pin="123456")
     c = TestClient(create_app(s, llm), base_url="http://127.0.0.1:8000")
     c.post("/api/login", json={"pin": "123456"})
-    c.post("/api/clearance/elevate", json={"level": 3, "pin": "123456"})
     c.post("/api/chat", json={"text": "remind me to call mom"})
 
     r = c.post("/api/chat", json={"text": "database access open"}).json()
@@ -787,7 +784,6 @@ def test_memory_in_database_viewer_and_phone_cannot_change_it(settings, llm):
     s = replace(settings, pin="123456")
     c = TestClient(create_app(s, llm), base_url="http://127.0.0.1:8000")
     c.post("/api/login", json={"pin": "123456"})
-    c.post("/api/clearance/elevate", json={"level": 3, "pin": "123456"})
     assert "remember that" in c.post("/api/chat", json={"text": "remember that I like tea"}).json()["reply"]
     token = c.post("/api/db/open", json={"pin": "123456"}).json()["token"]
     h = {"X-DB-Token": token}
@@ -796,3 +792,147 @@ def test_memory_in_database_viewer_and_phone_cannot_change_it(settings, llm):
     assert c.post("/api/db/facts/999/delete", headers=h).status_code == 404
     assert c.post(f"/api/db/facts/{rec['facts'][0]['id']}/delete", headers=h).json()["ok"]
     assert c.get("/api/db/records", headers=h).json()["counts"]["facts"] == 0
+
+
+def test_priority_emails_api(settings, llm):
+    import sqlite3
+    from dataclasses import replace
+
+    s = replace(settings, pin="123456")
+    app = create_app(s, llm)
+    c = TestClient(app, base_url="http://127.0.0.1:8000")
+    c.post("/api/login", json={"pin": "123456"})
+
+    # Check empty list
+    res = c.get("/api/emails/priority")
+    assert res.status_code == 200
+    assert res.json() == []
+
+    # Insert test emails into DB
+    with sqlite3.connect(s.db_path) as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS email_state (id TEXT, sender TEXT, subject TEXT, category TEXT, status TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO email_state (id, sender, subject, category, status) VALUES (?, ?, ?, ?, ?)",
+            ("msg_anthropic_1", "alerts@anthropic.com", "Claude 3.7 Sonnet Released", "Priority", "Pending"),
+        )
+        conn.execute(
+            "INSERT INTO email_state (id, sender, subject, category, status) VALUES (?, ?, ?, ?, ?)",
+            ("msg_vercel_2", "notifications@vercel.com", "Deployment Ready: project-nightmare", "Priority", "Pending"),
+        )
+        conn.execute(
+            "INSERT INTO email_state (id, sender, subject, category, status) VALUES (?, ?, ?, ?, ?)",
+            ("msg_temu_3", "deals@temuemail.com", "90% off coupon inside", "Temu Spam", "Pending"),
+        )
+        conn.execute(
+            "INSERT INTO email_state (id, sender, subject, category, status) VALUES (?, ?, ?, ?, ?)",
+            ("msg_standard_4", "newsletter@example.com", "Weekly Tech News", "Standard", "Read"),
+        )
+        conn.commit()
+
+    # Query priority endpoint
+    res = c.get("/api/emails/priority")
+    assert res.status_code == 200
+    emails = res.json()
+    assert isinstance(emails, list)
+    assert len(emails) == 2
+    ids = [e["id"] for e in emails]
+    assert "msg_vercel_2" in ids
+    assert "msg_anthropic_1" in ids
+    assert "msg_temu_3" not in ids
+    assert "msg_standard_4" not in ids
+
+    # Update status
+    update_res = c.post("/api/emails/msg_anthropic_1/status", json={"status": "Read"})
+    assert update_res.status_code == 200
+    assert update_res.json()["ok"] is True
+
+    # Filter by pending
+    res_pending = c.get("/api/emails/priority?status=Pending")
+    assert res_pending.status_code == 200
+    pending_emails = res_pending.json()
+    assert len(pending_emails) == 1
+    assert pending_emails[0]["id"] == "msg_vercel_2"
+
+
+def test_events_sse_stream(settings, llm):
+    import threading
+    import time
+    from backend.tools.email_listener import email_event_dispatcher
+
+    app = create_app(settings, llm)
+    c = TestClient(app, base_url="http://127.0.0.1:8000")
+    headers = {"X-Nightmare-Token": settings.api_token}
+
+    def push_event():
+        time.sleep(0.3)
+        email_event_dispatcher.dispatch({
+            "type": "new_email",
+            "id": "msg_test_sse_999",
+            "sender": "alerts@anthropic.com",
+            "subject": "Realtime SSE Notification Received",
+            "category": "Priority",
+            "status": "Pending",
+        })
+
+    t = threading.Thread(target=push_event, daemon=True)
+    t.start()
+
+    with c.stream("GET", "/api/events", headers=headers) as response:
+        assert response.status_code == 200
+        assert "text/event-stream" in response.headers["content-type"]
+        received = []
+        for line in response.iter_lines():
+            received.append(line)
+            if "msg_test_sse_999" in line:
+                break
+
+    assert any("connected" in l for l in received)
+    assert any("new_email" in l for l in received)
+    assert any("msg_test_sse_999" in l for l in received)
+
+
+def test_live_weather_endpoint_and_recent_apps_in_status(client, monkeypatch):
+    from backend.tools import weather as weather_mod
+
+    async def fake_fetch_card(city, api_key="", timeout=5.0, force=False):
+        return {
+            "city": city,
+            "temp_c": "31°C",
+            "feels_c": "35°C",
+            "high_c": "33°C",
+            "low_c": "26°C",
+            "condition": "Partly Cloudy",
+            "humidity": "74%",
+            "wind": "14 km/h",
+            "uv_index": "7 (High)",
+            "updated_at": "2:30 AM",
+            "interval": "1h",
+            "live": True,
+        }
+
+    monkeypatch.setattr(weather_mod, "fetch_weather_card", fake_fetch_card)
+    monkeypatch.setattr(weather_mod, "_card_cache", {})
+
+    w = client.get("/api/weather?city=Calbayog", headers=HDR)
+    assert w.status_code == 200
+    body = w.json()
+    assert body["ok"] is True
+    assert body["weather"]["city"] == "Calbayog"
+    assert body["weather"]["temp_c"] == "31°C"
+    assert body["weather"]["wind"] == "14 km/h"
+    assert body["weather"]["uv_index"] == "7 (High)"
+
+    # Open allowlisted apps and verify recent_apps in /api/status
+    monkeypatch.setattr(
+        "backend.core.orchestrator.execute",
+        lambda plan: actions.ActionResult(True, "ok"),
+    )
+    chat(client, "open notepad")
+    st = client.get("/api/status", headers=HDR).json()
+    assert "recent_apps" in st
+    assert len(st["recent_apps"]) >= 1
+    assert st["recent_apps"][0]["app_id"] == "notepad"
+    assert st["recent_apps"][0]["command"] == "open notepad"
+

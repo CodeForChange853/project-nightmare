@@ -23,6 +23,8 @@ from backend.core.router import route
         ("what is next for bims", "progress"),
         ("what's the next task in citizen graph", "progress"),
         ("list my projects", "list_projects"),
+        ("how many project i have", "list_projects"),
+        ("how many projects do I have", "list_projects"),
         ("what projects are on my desktop", "list_projects"),
         ("open notepad", "open_app"),
         ("launch vs code", "open_app"),
@@ -52,6 +54,8 @@ from backend.core.router import route
         ("clear reminder 3", "delete_note"),
         ("open youtube in this browser", "open_url"),
         ("open youtube and search lofi", "open_url"),
+        ("open youtube music", "open_url"),
+        ("play lofi on youtube music", "open_url"),
         ("play lofi on spotify", "open_url"),
         ("google how to center a div", "open_url"),
         ("open chrome", "open_app"),
@@ -94,3 +98,21 @@ def test_injected_text_cannot_become_an_action(settings, registry):
     intent = route("summarize bims", settings, registry)
     assert intent.kind == "progress"
     assert intent.task_id is None and intent.command is None
+
+
+def test_youtube_music_routing(settings, registry):
+    i1 = route("open youtube music", settings, registry)
+    assert i1.kind == "open_url"
+    assert i1.url == "https://music.youtube.com"
+    assert i1.site == "YouTube Music"
+
+    i2 = route("play bohemian rhapsody on youtube music", settings, registry)
+    assert i2.kind == "open_url"
+    assert i2.url == "https://music.youtube.com/search?q=bohemian+rhapsody"
+    assert i2.site == "YouTube Music"
+    assert i2.query == "bohemian rhapsody"
+
+    i3 = route("open yt music", settings, registry)
+    assert i3.kind == "open_url"
+    assert i3.url == "https://music.youtube.com"
+    assert i3.site == "YouTube Music"

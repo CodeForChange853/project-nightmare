@@ -1,8 +1,10 @@
 import Orb from './Orb'
 
 /**
- * The blood-moon eye as a hold-to-talk button. Shared by the graph, the mini window and the phone.
- * Evolves its outer socket and orbital HUD reticles across Level 1, Level 3, and Level 5.
+ * The Crimson Cosmic Eye Sigil as a hold-to-talk interactive talisman.
+ * Shared by the main NodeGraph, Level 5 Command Center, MiniView, and PhoneView.
+ * Features a volumetric Fog Light bloom when holding Space or the Mic button (`mode === 'listening'`),
+ * and a calm breathing astral idle state.
  */
 export default function EyeButton({
   mode,
@@ -11,10 +13,10 @@ export default function EyeButton({
   onPressEnd,
   style,
   className = '',
-  clearanceLevel = 1,
 }) {
-  const isL5 = clearanceLevel === 5
-  const isL3 = clearanceLevel === 3
+  const isListening = mode === 'listening'
+  const isSpeaking = mode === 'speaking'
+  const isIdle = mode === 'idle'
 
   return (
     <button
@@ -30,96 +32,103 @@ export default function EyeButton({
       onPointerCancel={onPressEnd}
       onContextMenu={(e) => e.preventDefault()}
       aria-label="Hold to talk"
-      title={canTalk ? 'Hold to talk' : undefined}
+      title={canTalk ? 'Hold to talk (or hold Space)' : undefined}
       style={style}
-      className={`group relative touch-none select-none rounded-full transition-shadow duration-700 disabled:cursor-default ${className} ${
-        isL5
-          ? 'shadow-[0_0_65px_-8px_rgba(255,209,102,0.42),0_0_110px_-15px_rgba(220,20,60,0.58)]'
-          : isL3
-            ? 'shadow-[0_0_45px_-8px_rgba(232,163,61,0.34),0_0_80px_-18px_rgba(220,20,60,0.45)]'
-            : ''
+      className={`group relative touch-none select-none rounded-full transition-all duration-500 disabled:cursor-default ${className} ${
+        isListening
+          ? 'shadow-[0_0_95px_12px_rgba(255,30,66,0.75),0_0_160px_28px_rgba(255,209,102,0.45)] scale-[1.03]'
+          : 'shadow-[0_0_70px_-6px_rgba(255,209,102,0.42),0_0_120px_-12px_rgba(220,20,60,0.62)]'
       }`}
     >
-      {/* Socket radial depth */}
+      {/* VOLUMETRIC FOG LIGHT BLOOM (Ignites when holding Space or Mic button) */}
       <span
-        className={`absolute inset-[6%] rounded-full transition-all duration-700 ${
-          isL5
-            ? 'bg-[radial-gradient(circle,rgba(65,12,20,0.92)_0%,rgba(19,7,10,0.72)_58%,transparent_74%)] shadow-[inset_0_0_85px_rgba(255,209,102,0.18)]'
-            : isL3
-              ? 'bg-[radial-gradient(circle,rgba(52,14,12,0.88)_0%,rgba(19,7,10,0.65)_56%,transparent_72%)] shadow-[inset_0_0_80px_rgba(232,163,61,0.15)]'
-              : 'bg-[radial-gradient(circle,rgba(40,6,12,0.85)_0%,rgba(19,7,10,0.6)_55%,transparent_72%)] shadow-[inset_0_0_80px_rgba(220,20,60,0.12)]'
+        aria-hidden
+        className={`pointer-events-none absolute -inset-[28%] rounded-full transition-all duration-500 ${
+          isListening
+            ? 'opacity-100 scale-110 animate-pulse'
+            : isSpeaking
+              ? 'opacity-65 scale-100'
+              : isIdle
+                ? 'opacity-30 scale-95'
+                : 'opacity-20 scale-90'
+        }`}
+        style={{
+          background: isListening
+            ? 'radial-gradient(circle, rgba(255,225,130,0.38) 0%, rgba(255,30,66,0.48) 32%, rgba(165,8,34,0.28) 58%, transparent 76%)'
+            : 'radial-gradient(circle, rgba(255,190,90,0.16) 0%, rgba(220,20,60,0.24) 42%, transparent 72%)',
+          filter: isListening ? 'blur(18px)' : 'blur(12px)',
+        }}
+      />
+
+      {/* Secondary Swirling Fog-Light Conic Plume on Space / Mic Hold */}
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute -inset-[18%] rounded-full orbit-slow transition-opacity duration-500 ${
+          isListening ? 'opacity-95' : 'opacity-0'
+        }`}
+        style={{
+          background:
+            'conic-gradient(from 0deg, transparent 0deg, rgba(255,38,75,0.42) 45deg, rgba(255,209,102,0.45) 90deg, transparent 135deg, rgba(255,38,75,0.38) 215deg, rgba(255,209,102,0.42) 270deg, transparent 360deg)',
+          filter: 'blur(22px)',
+        }}
+      />
+
+      {/* Deep Cosmic Socket Radial Depth */}
+      <span
+        className={`absolute inset-[8%] rounded-full transition-all duration-700 ${
+          isListening
+            ? 'bg-[radial-gradient(circle,rgba(95,14,28,0.95)_0%,rgba(28,4,9,0.82)_58%,transparent_76%)] shadow-[inset_0_0_95px_rgba(255,209,102,0.35)]'
+            : 'bg-[radial-gradient(circle,rgba(65,10,18,0.92)_0%,rgba(16,4,7,0.75)_58%,transparent_75%)] shadow-[inset_0_0_85px_rgba(255,209,102,0.2)]'
         }`}
       />
 
-      {/* Primary socket rim */}
-      <span
-        className={`absolute inset-[6%] rounded-full border transition-all duration-700 ${
-          isL5
-            ? 'border-[#ffd166]/65 shadow-[inset_0_0_32px_rgba(255,209,102,0.22)]'
-            : isL3
-              ? 'border-bile/55 shadow-[inset_0_0_22px_rgba(232,163,61,0.16)]'
-              : 'border-scar/40'
-        }`}
-      />
+      {/* Crimson Cosmic Eye Sigil Outer SVG Filigree & Orbital Nodes */}
+      <svg
+        aria-hidden
+        viewBox="0 0 200 200"
+        className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+      >
+        {/* Outer segmented astrolabe ring */}
+        <circle
+          cx="100"
+          cy="100"
+          r="86"
+          fill="none"
+          stroke={isListening ? '#fff3b0' : '#ffd166'}
+          strokeOpacity={isListening ? '0.88' : '0.6'}
+          strokeWidth={isListening ? '1.5' : '1.1'}
+          strokeDasharray="16 6 3 6"
+          className="origin-center orbit-slow"
+        />
 
-      {/* L3 & L5 Tactical Orbital SVG Reticle */}
-      {(isL3 || isL5) && (
-        <svg
-          aria-hidden
-          viewBox="0 0 200 200"
-          className="pointer-events-none absolute inset-[1%] h-[98%] w-[98%] overflow-visible"
-        >
-          {/* Outer segmented telemetry arc */}
-          <circle
-            cx="100"
-            cy="100"
-            r="93"
-            fill="none"
-            stroke={isL5 ? '#ffd166' : '#e8a33d'}
-            strokeOpacity={isL5 ? '0.55' : '0.4'}
-            strokeWidth={isL5 ? '1.1' : '0.9'}
-            strokeDasharray={isL5 ? '18 8 4 8' : '28 16'}
-            className=" origin-center orbit-slow"
-          />
-          {/* Cardinal bracket ticks */}
-          {[0, 90, 180, 270].map((deg) => (
-            <g key={deg} transform={`rotate(${deg} 100 100)`}>
-              <line
-                x1="100"
-                y1="2"
-                x2="100"
-                y2={isL5 ? '9' : '7'}
-                stroke={isL5 ? '#ffd166' : '#e8a33d'}
-                strokeWidth={isL5 ? '1.6' : '1.2'}
-                strokeOpacity={isL5 ? '0.85' : '0.65'}
-              />
-            </g>
-          ))}
-          {/* L5 Architect diagonal eclipse ticks & inner counter-ring */}
-          {isL5 && (
-            <>
-              {[45, 135, 225, 315].map((deg) => (
-                <g key={deg} transform={`rotate(${deg} 100 100)`}>
-                  <circle cx="100" cy="6.5" r="1.6" fill="#ff5466" fillOpacity="0.9" />
-                </g>
-              ))}
-              <circle
-                cx="100"
-                cy="100"
-                r="88"
-                fill="none"
-                stroke="#ff5466"
-                strokeOpacity="0.4"
-                strokeWidth="0.8"
-                strokeDasharray="6 14"
-                className="origin-center orbit-reverse"
-              />
-            </>
-          )}
-        </svg>
-      )}
+        {/* Counter-rotating inner sigil track */}
+        <circle
+          cx="100"
+          cy="100"
+          r="78"
+          fill="none"
+          stroke="#ff2a4b"
+          strokeOpacity={isListening ? '0.8' : '0.45'}
+          strokeWidth="0.9"
+          strokeDasharray="5 11"
+          className="origin-center orbit-reverse"
+        />
 
-      <Orb mode={mode} clearanceLevel={clearanceLevel} className="relative" />
+        {/* Diagonal cosmic star nodes */}
+        {[45, 135, 225, 315].map((deg) => (
+          <g key={deg} transform={`rotate(${deg} 100 100)`}>
+            <circle
+              cx="100"
+              cy="14"
+              r={isListening ? '2' : '1.4'}
+              fill="#ffd166"
+              fillOpacity={isListening ? '0.95' : '0.7'}
+            />
+          </g>
+        ))}
+      </svg>
+
+      <Orb mode={mode} className="relative z-10" />
     </button>
   )
 }

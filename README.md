@@ -1,240 +1,273 @@
 # Project Nightmare
 
-A local, security-hardened voice and text command assistant for Windows. Ask it, by voice or text, about the projects on your Desktop, workspace priorities, your reminders, the weather, to search project documentation, or to manage allowlisted apps, presentations, and team timelines.
+### Free voices and Mandarin meeting captions
 
-Summaries and chat use your signed-in **Antigravity CLI (`agy`)** on the Google AI Pro subscription with zero API key and no separate billing. Safe local tools handle file navigation, PowerPoint automation, OpenXML spreadsheet parsing, and Git intelligence deterministically in Python without cloud LLM latency. Your Android phone can access it securely and strictly read-only over Tailscale.
+Open **Voice** on the desktop HUD (or type `/voice`) to choose and preview the voices your browser exposes. Automatic selection prefers available natural/online and Google English voices within the selected gender; playback uses natural pitch. Voice and speed choices persist in this browser. No paid speech API or model download was added. Voice quality depends on the actual browser voice inventory, and online voices require internet.
+
+Open **Meeting** (or type `/meeting` or `/transcribe`) for Mandarin Chinese captions with English translations. Choose microphone, PC/tab audio, or both, then click **Start captions**. For online calls, desktop Chrome 135+ can pass shared audio to recognition; select the meeting tab or screen and enable **Share audio**. Native meeting applications require sharing a screen with system audio where the picker supports it. Missing shared audio produces an error rather than switching to the microphone. Headphones help avoid duplicate audio in mixed mode.
+
+Chinese interim captions come from the browser speech service. Finalized text is translated sequentially through the existing signed-in `agy` provider, so English can lag behind speech, particularly during long meetings or other model calls. Translation can be paused and failed rows retried. Export the timestamped Chinese/English transcript before closing; it is not saved to conversation memory. Export/clear at the 2,000-row session limit.
+
+Meeting captions never enter the command router, and desktop command listening, spoken notifications, and idle sleep are suspended while the panel is open. The translation endpoint requires a local full-access session, rejects remote read-only requests, sanitizes text before wrapping it in `<handoff>` tags, and uses the existing isolated CLI provider. Browser speech services may send audio online; translation sends finalized text to your existing provider. Let meeting participants know you are transcribing.
+
+**UNVERIFIED live:** actual Mandarin accuracy, microphone/system audio on this desktop, available voice quality, and real `agy` translation latency. Automated tests use simulated speech and translation; test with a short Mandarin clip before your meeting.
+
+**Project Nightmare** is a local, security-hardened voice and text command assistant for Windows. Designed as a single-tier **Level 5 Architect** desktop command center, it lets you inspect and manage Desktop projects, run allowlisted apps and dev tasks, navigate local files, control PowerPoint slide shows by voice, track thesis timelines & Google Drive diffs, rehearse academic thesis defenses offline, and monitor real-time hardware telemetry.
+
+Summaries and conversational chat use your signed-in **Antigravity CLI (`agy`)** on a Google AI Pro subscription with zero API keys and no separate billing. Deterministic Python and native Windows tools execute fast-path commands in `<50 ms` without cloud latency, while your Android phone can connect strictly read-only over Tailscale.
 
 ```
-[Voice / Text Input]
+[Voice (Web Speech PTT) / Text Input]
        │
        ▼
-[FastAPI Server @ 127.0.0.1:<port>]
+[FastAPI Server @ 127.0.0.1:<port> (Modular Routers: backend/routers/*)]
        │
-       ├──► [3-Tier Security Clearance Guard]
-       │      ├── Level 1: Observer (Default / Remote, Read-Only)
-       │      ├── Level 3: Operator (PIN, 30m decay, Apps / Dev Tasks / Safe Files / Git)
-       │      └── Level 5: Architect (Password, 10m decay, PPT / Timeline / Diff / System Authority)
+       ├──► [Security & Authority Boundary]
+       │      ├── Desktop Session: Permanent Level 5 (Architect) Authority
+       │      ├── Remote Tailscale Session: Strictly Read-Only Enforced
+       │      └── High-Impact Actions: Mandatory Click Confirmation Gate (needs_confirm=True)
        │
        ▼
-[Multi-Tier Intent Router]
-       ├── Tier 1: Deterministic Regex Router (<1 ms)
-       ├── Tier 2: FastEmbed Semantic Vector Router (RAM-cached ONNX embeddings, instant warmup)
-       └── Tier 3: Closed-Set Read-Only LLM Classifier (Fallback for conversational phrasing)
+[4-Layer Deterministic & Semantic Intent Router]
+       ├── Layer 1: Pre-Router Normalizer & Deterministic Regex Router (<1 ms)
+       ├── Layer 2: Stateful ConversationContext Buffer (120s TTL, <5 ms ordinal/pronoun resolution)
+       ├── Layer 3: FastEmbed ONNX Semantic Router + Margin-Gated Clarification
+       └── Layer 4: Closed-Set Read-Only LLM Classifier + FastEmbed Semantic Cache (<25 ms)
        │
-       ├─────────────────────────────────┬─────────────────────────────────┐
-       ▼                                 ▼                                 ▼
-[Deterministic Python Tools]     [Confirmation Gated Actions]      [Antigravity CLI (`agy`)]
- • Smart File Navigator (L3+)     • App & Dev Task Launch (L3+)    • Gemini 3.8 Flash Low/High
- • GitHub Intelligence (L3+)      • PC Reboot & Shutdown (L5)      • Document / Handoff Summaries
- • PPT Exact-Slide Presenter (L5) • Nightmare Background Reboot(L5)• Conversational Chat
- • 4-Tab CitizenGraph Tracker(L5) • Team Stale Email Nudger (L5)   (Never touches shell or paths;
- • GDrive Diff Engine (L5)                                         never chooses actions)
- • Workspace Awareness & RAG
+       ├──────────────────────────────────┬──────────────────────────────────┐
+       ▼                                  ▼                                  ▼
+[Deterministic Local Tools]       [Confirmation-Gated Actions]       [Antigravity CLI (`agy`)]
+ • Smart File Navigator            • Allowlisted App & Task Launch    • Gemini 3.8 Flash Low/High
+ • GitHub & Workspace Intelligence • PC Reboot & Shutdown             • Document / Handoff Summaries
+ • Persistent PPT COM Presenter    • Nightmare Background Rebuild     • Concise Voice Chat (~50-60w)
+ • 4-Tab CitizenGraph Tracker      • Team Stale Email Nudger (SMTP)   (Runs in empty scratch sandbox;
+ • SQLite GDrive Diff Engine                                           never touches shell or paths;
+ • Offline Thesis Defense Co-Pilot                                     never chooses actions)
+ • Native Win32 Hardware Telemetry
 ```
 
-The full voice and text command list is in `nightmare_helper.txt` (or type `/help`). Complete phase logs, design notes, and security boundaries are documented in `handoff.md` and `newsession.md`.
+The complete voice and text command reference is in [`nightmare_helper.txt`](nightmare_helper.txt) (or type `/help` in the UI). Session context, architectural invariants, and phase history are maintained in [`handoff.md`](handoff.md) and [`AGENTS.md`](AGENTS.md).
 
 ---
 
-## 3-Tier Security Clearance Architecture
+## Security & Authority Model (Single-Tier Level 5 Architect)
 
-Project Nightmare implements a defense-in-depth, 3-tier clearance model. Startup defaults to Level 1 Observer for all sessions, ensuring no actions or mutations can run without explicit elevation.
+Project Nightmare operates under a permanent **Level 5 (Architect)** single-tier clearance model for the local desktop operator, paired with defense-in-depth execution guards:
 
-| Clearance Tier | Name | Authentication & TTL | Capabilities & Boundaries |
-|---|---|---|---|
-| **Level 1** | **Observer** *(Default)* | Default on startup; remote sessions hard-capped at L1 | Strictly read-only. Access project progress, daily briefings, READMEs, weather, reminders, local RAG search, conversation recall, and chat. Blocks app launching, file opening, memory writes, and system commands. |
-| **Level 3** | **Operator** | 6-digit PIN (`NIGHTMARE_L3_PIN`); 30-minute inactivity decay | Unlocks allowlisted app launches, dev task execution, persistent memory writes ("remember that X"), Safe File Navigator, and GitHub repository intelligence. |
-| **Level 5** | **Architect** | Master password (`NIGHTMARE_L5_PASSWORD`); 10-minute inactivity decay | Full system authority. Unlocks Settings, PowerPoint exact-slide automation, CitizenGraph 4-tab telemetry & GDrive diff engine, team email nudging, PC restart/shutdown, and Nightmare background rebuilding. |
-
-- **Elevation:** Say `"nightmare open level 3"` or `"nightmare open level 5"` (or click the clearance badge) to trigger the authentication modal. Elevated credentials use constant-time `hmac.compare_digest` with strict rate-limiting (5 attempts per 60 seconds).
-- **Instant Lockdown:** Say `"nightmare lock down"`, `"drop to level 1"`, or enter sleep mode (`/sleep`) to immediately revoke elevated privileges and drop back to Level 1.
-- **Inactivity Decay:** Clearance automatically drops to Level 1 after 30 minutes of idle time for Level 3, and 10 minutes for Level 5.
-- **Remote Hard Cap:** Tailscale remote sessions are strictly hard-capped at Level 1 Observer and cannot elevate, even with valid credentials.
+| Boundary | Mechanism | Protection Provided |
+|---|---|---|
+| **Single-Tier Authority** | **Level 5 (Architect)** | Full desktop access to workspace tools, file navigation, PowerPoint COM control, CitizenGraph timeline telemetry, Thesis Defense Co-Pilot, and Settings without recurring PIN/password prompts or inactivity lockouts. |
+| **Mandatory Click Confirmation** | `needs_confirm=True` (`PendingStore`) | High-impact mutations—PC restart/shutdown, Nightmare background rebuild, dev tasks, and outbound SMTP emails—always require an explicit UI click approval (`ConfirmDialog`) before execution. |
+| **Remote Read-Only Guard** | `readonly=True` (Tailscale) | Phone sessions connecting via Tailscale are strictly read-only. They can query progress, briefings, docs, reminders, weather, and chat, but cannot launch apps, run tasks, mutate settings, or approve confirmations. |
+| **LLM Sandbox Isolation** | `AgyProvider` (`backend/core/llm.py`) | The LLM **never** chooses actions, **never** receives filesystem paths or shell access, and runs inside an isolated empty scratch folder with sensitive environment variables scrubbed. |
+| **Filesystem Boundary Defense** | `fs_reader.py` & `file_navigator.py` | Path resolution strictly enforces allowed user roots (`Desktop`, `Documents`, `Downloads`), resolves symlinks, prunes heavy directories (`node_modules`, `.git`, `.venv`), and blocks sensitive files (`.env`, keys, credentials). |
+| **No `shell=True`** | `actions.py` | All subprocesses execute from discrete argument arrays; `.cmd`/`.bat` wrappers reject shell metacharacters. |
 
 ---
 
 ## Key Features
 
-### 1. Voice & Speech Synthesis
-- **Orb & Spacebar Control:** Hold down the Orb eye button or the Spacebar to speak, release to send.
-- **Dual Voice Synthesis:** High-quality speech synthesis with male and female voice switching (`"switch voice to female"`, `"switch voice to male"`) and speed control (`0.9x` to `1.5x`).
-- **Accent Toggles:** Instant status-bar switching between `mic: en-PH` and `mic: en-US`.
-- **Session Memory:** Natural conversation recall (`"what did we discuss earlier"`) and persistent facts (`"remember that X"`, `"forget X"`).
+### 1. Level 5 Infernal Command Center & Voice Interface
+- **Unified Desktop HUD (`Level5View.jsx`):** Features the interactive **Crimson Cosmic Eye Sigil** (`Orb.jsx`), branching GSAP project graph (`NodeGraph.jsx`), collapsible left navigation sidebar, live hardware/weather status bar, and recent activity launcher strip.
+- **Push-to-Talk & First-Sentence Streaming TTS:** Hold the **Spacebar** or the **Eye button** to speak. Progressive sentence chunking (`useSpeech.js`) begins speaking the first sentence immediately while subsequent text streams in, with dual voice selection (`male` / `female`), speed cycling (`0.9x`–`1.5x`), and mic locale toggling (`en-PH` / `en-US`).
+- **Global Hotkey Mini-Window:** Press **Ctrl+Alt+N** from any Windows application to summon an always-on-top compact floating window (`MiniView.jsx`).
 
-### 2. Workspace Awareness & Local RAG
-- **Zero-Latency Briefings:** Plain Python background scanners evaluate Git branches, uncommitted files, commits ahead/behind, TODO counts, and project priorities (`"workspace briefing"`, `"what changed since yesterday"`, `"what should I work on"`).
-- **Local Project RAG:** Semantic vector search across Desktop project documentation using RAM-cached FastEmbed ONNX embeddings (`"search projects for authentication"`). Responds in ~15-30 ms without cloud API overhead.
+### 2. Workspace Awareness, Smart File Navigator & Local RAG
+- **Zero-Latency Workspace Briefings:** Background Python scanners inspect Desktop Git repositories for branch state, uncommitted changes, ahead/behind counts, TODOs, and project priorities (`"workspace briefing"`, `"what changed since yesterday"`).
+- **Hybrid Trigram & Phonetic File Search:** Indexes safe documents (`.pptx`, `.docx`, `.xlsx`, `.pdf`, `.txt`, `.md`) across `Desktop`, `Documents`, and `Downloads`, resolving phonetic Web Speech distortions and ordinal follow-ups (`"the first one"`, `"open it"`) in `<5 ms`.
+- **Local Project RAG:** In-memory FastEmbed ONNX (`BAAI/bge-small-en-v1.5`) vector search across Desktop documentation (`"search projects for authentication"`) with a hard `3.0s` timeout guard.
 
-### 3. Smart File Navigator & GitHub Intelligence (Level 3+)
-- **Safe File Indexing:** Fast indexing across `Desktop`, `Documents`, and `Downloads` for safe document formats (`.pptx`, `.ppt`, `.docx`, `.doc`, `.xlsx`, `.pdf`, `.txt`, `.md`).
-- **Boundary Defense:** Traversal protections strictly skip `.git`, `node_modules`, `.venv`, `AppData`, and secret patterns (`.env`, passwords, credentials, keys).
-- **Safe Opening:** Voice commands like `"find file related to timeline and open it in word or powerpoint"` safely launch files with automated disambiguation.
-- **GitHub Intelligence:** Checks remote commit status, open PRs, and merge conflicts across Desktop repos (`"check my github repositories"`, `"github status"`).
+### 3. Persistent PowerPoint Exact-Slide Presenter
+- **Zero-Dependency OpenXML Indexing:** Parses `.pptx` files directly via Python `zipfile` + `xml.etree.ElementTree` to index slide titles, body text, and slide numbers.
+- **Sub-15ms Persistent COM Worker (`ppt_worker.ps1`):** Maintains a persistent background PowerShell/COM bridge so slide jumps (`"go to slide 5"`), topic searches (`"show the slide about dataset preprocessing"`), and transitions (`"next slide"`, `"previous slide"`) execute in `~4–15 ms` and auto-launch the slideshow if inactive.
 
-### 4. PowerPoint Exact-Slide Presenter (Level 5)
-- **Zero-Dependency XML Parsing:** Parses `.pptx` archives directly using standard library `zipfile` + `xml.etree.ElementTree` to index slide titles, bodies, and numbers.
-- **COM Automation with PowerShell Fallback:** Controls presentation slide shows via Windows COM interop (falling back seamlessly to PowerShell COM if `pywin32` is absent).
-- **Direct Voice Navigation:**
-  - Jump directly to a slide: `"find and open citizengraph ppt and show slide 5"`, `"go to slide 7"`.
-  - Topic matching: `"show the slide about dataset preprocessing"`.
-  - Presentation controls: `"next slide"`, `"previous slide"`.
+### 4. CitizenGraph 4-Tab Telemetry, GDrive Diff Engine & Priority Inbox
+- **4-Tab Master Workbook Parser (`team_tracker.py`):** Parses `CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx` using zero-dependency OpenXML into:
+  1. **General 8-Month Roadmap** (`STG-01`–`STG-09` milestones & dependencies)
+  2. **Detailed Weekly Gantt** (21 WBS tasks across Phase 1 & Phase 2)
+  3. **Objectives & KPI Alignment** (`SO-1`–`SO-7` & Chapter 1 quantitative targets)
+  4. **Phase Summary & Dashboard** (Live completion rollups)
+- **SQLite GDrive Diff Engine:** Compares live synced workbooks against stored SQLite baselines to report status transitions, schedule shifts, and completion deltas (`"what changed in the citizengraph timeline"`).
+- **Priority Inbox & Stale Task Nudger:** Streams real-time priority email toast notifications via SSE and drafts SMTP reminder emails for stale tasks (requiring click confirmation to send).
 
-### 5. CitizenGraph 4-Tab Telemetry, Shared Drive Excel Sync & GDrive Diff Engine (Level 5)
-- **4-Tab Master Workbook Telemetry:** Parses the 4-sheet master workbook (`CitizenGraph_Thesis_Timeline_2026_2027-v2.xlsx`) and backwards-compatible timelines:
-  1. **General 8-Month Roadmap:** STG-01..STG-09 stages, active month indicators, and milestones.
-  2. **Detailed Weekly Gantt:** 21 WBS tasks (1.1..1.12 Phase 1, 2.1..2.9 Phase 2) compressed across 24 weekly spans.
-  3. **Objectives & KPI Alignment:** SO-1..SO-7 objectives, architectural components, datasets, and benchmark targets.
-  4. **Phase Summary & Dashboard:** Live Python rollups (Phase 1, Phase 2, Overall WBS) and 6 quantitative Chapter 1 benchmark targets (Return-Trip Prevention >= 90%, Exact-Match Accuracy >= 95%, Gap Analysis M = R \ H >= 90%, Topological Sequence >= 90%, Post-AST Execution >= 95%, Edge Latency <= 5.0s).
-- **SQLite GDrive Diff Engine:** Categorizes status transitions, schedule shifts, deliverable edits, and completion deltas against a stored baseline (`"nightmare what change in the citizengraph timeline from the gdrive"`).
-- **Desktop Command Center (`/timeline`):** High-density single-active-tab desktop UI (`TeamProgressPanel.jsx`) with Obsidian/Crimson styling, GSAP tab transitions, [CHECK GDRIVE / DIFF], [OPEN IN EXCEL], and [SYNC BASELINE] controls.
-- **Team Quota Tracker & Stale Nudger:** Tracks quotas and flags tasks un-updated for >= 3 days. Generates draft email reminders via `smtplib`, requiring Level 5 click/voice confirmation to send (`"approve email"`).
+### 5. Offline Academic Thesis Defense Co-Pilot
+- **Slide-Aware 12-Minute Stopwatch (`defense_copilot.py`):** Tracks per-slide pacing budgets (`on_pace`, `nearing_limit`, `over_budget`) synchronized with active PowerPoint slides.
+- **Pre-Computed 54-Q&A Offline Bank (`defense_qa_data.py`):** Stores 54 CitizenGraph defense questions and ground-truth rubrics (Methodology, System Architecture, Problem Statement/RRL, Benchmarks) with pre-computed 384-dim ONNX embeddings in SQLite for `<30 ms` 100% offline panelist Q&A rehearsal and answer evaluation.
 
-### 6. System Authority Commands (Level 5)
-- **Controlled System Management:** Rebuild and restart Nightmare in the background (`"rerun yourself"`, `"restart nightmare"`) or restart/shut down your PC (`"restart my pc"`, `"shut down my pc"`).
-- **Mandatory Confirmation Gate:** High-authority system commands and email notifications always enforce `needs_confirm=True` (click confirmation or voice `"approve"` in Level 5).
-- **Emergency Abort:** Immediate abort via `"cancel shutdown"` executes `shutdown /a` without waiting for confirmation.
-
-### 7. Global Hotkey Mini-Window & Phone Companion
-- **Always-on-Top Mini Window:** Press **Ctrl+Alt+N** from any application to summon a lightweight, compact Nightmare window. Hold Space to speak. Say `"home"` to expand or `"mini"` to shrink.
-- **Phone Companion (Tailscale):** Mobile-optimized UI featuring a 4-tab bar (Talk / Projects / Reminders / Chat). Strictly read-only over Tailscale.
+### 6. Native Hardware Telemetry Cockpit
+- **Sub-Millisecond Win32 Metrics (`system_telemetry.py`):** Queries `ctypes.windll.kernel32` directly for zero-sleep CPU load deltas, physical RAM usage, and battery status (`<0.2 ms`), paired with a daemon background thread polling top processes every 5 seconds.
 
 ---
 
 ## Slash Commands
 
-Type `/` into the command input box to access quick shortcuts:
-- `/help` — Opens the interactive Developer Helper overlay (`nightmare_helper.txt`).
-- `/timeline` — Opens the Level 5 CitizenGraph Telemetry & GDrive Diff Command Center.
-- `/clear` or `/new` — Resets conversation history and starts a fresh session.
-- `/reminders` — Lists active notes and reminders.
-- `/db` — Opens the SQLite database viewer (Activity log, reminders, memories).
-- `/settings` — Opens allowlisted app configuration and task manager.
-- `/sleep` — Enters standby sleep mode and locks clearance down to Level 1.
+Type `/` into the command composer for instant shortcuts:
+
+| Command | Action |
+|---|---|
+| `/help` | Opens the interactive Developer Helper reference (`nightmare_helper.txt`). |
+| `/timeline` | Opens the CitizenGraph 4-Tab Telemetry, GDrive Diff & Priority Inbox Command Center. |
+| `/defense` | Opens the Academic Thesis Defense Co-Pilot HUD. |
+| `/cockpit` or `/telemetry` | Queries live CPU, RAM, battery, and top process telemetry. |
+| `/review` | Opens the Router Miss Review queue to promote unrecognized utterances into semantic exemplars. |
+| `/reminders` | Lists active reminders and notes. |
+| `/db` | Opens the SQLite Database Inspector (activity log, turns telemetry, reminders, memories). |
+| `/settings` | Opens the allowlisted Apps & Tasks manager. |
+| `/clear` or `/new` | Clears conversation history and resets the session cache. |
+| `/sleep` | Puts Nightmare into Cosmic Idle Standby mode. |
 
 ---
 
-## Phone Access (Tailscale, Read-Only)
+## Project Architecture & Directory Structure
 
-1. Install Tailscale on your laptop and phone under the same account; enable MagicDNS and HTTPS Certificates in the Tailscale admin console.
-2. Set `NIGHTMARE_PHONE_PIN` in `backend\.env` (6+ digits).
-3. Run `.\scripts\setup_tailscale.ps1 -Restart`, then open the printed `https://<laptop>.<tailnet>.ts.net/` in Chrome on your phone.
+The codebase is modularized so co-developers can navigate backend API routers, core routing/orchestration logic, deterministic tools, and React UI components independently:
 
-Everything arriving through Tailscale is enforced read-only and hard-capped at **Level 1 Observer**. The phone can query project progress, Git status, briefings, documents, weather, reminders, and chat, but cannot launch apps, run dev tasks, open files, approve actions, open Settings, access the raw database, or elevate clearance.
+```text
+project-nightmare/
+├── AGENTS.md                        # AI Agent & Co-Developer onboarding instructions
+├── README.md                        # Project overview, setup, and architecture guide
+├── handoff.md / newsession.md       # Synchronized session state & engineering log (kept 100% identical)
+├── nightmare_helper.txt             # Complete voice & text command reference
+├── scripts/                         # PowerShell setup, launcher, Tailscale, & benchmark scripts
+│   ├── install.ps1                  # One-step venv + npm + .env installer
+│   ├── start_nightmare.ps1          # Launches/rebuilds backend + hotkey helper
+│   ├── setup_tailscale.ps1          # Configures read-only Tailscale HTTPS access for phone
+│   ├── coldstart.py                 # Cold-start & fast-path latency benchmark
+│   └── replay_router.py             # Offline router accuracy & latency replay harness
+├── backend/
+│   ├── main.py                      # Slim FastAPI app factory, lifespan workers, middleware & static mount
+│   ├── config.py                    # Environment configuration & path settings (backend/.env)
+│   ├── hotkey.py                    # Windows global hotkey hook (Ctrl+Alt+N) via ctypes
+│   ├── routers/                     # Modular FastAPI APIRouter package
+│   │   ├── __init__.py              # Assembles /api router from domain modules
+│   │   ├── deps.py                  # Shared AppContext, SessionStore, PinAccess, Pydantic schemas & guards
+│   │   ├── auth.py                  # /api/login, /api/logout
+│   │   ├── chat.py                  # /api/chat, /api/confirm, /api/events (SSE), /api/emails/*, /api/calendar/*
+│   │   ├── system.py                # /api/status, /api/clearance/status, /api/weather, /api/window/mode
+│   │   ├── telemetry.py             # /api/system/telemetry
+│   │   ├── defense.py               # /api/defense/* (Thesis Defense Co-Pilot endpoints)
+│   │   ├── team_tracker.py          # /api/team-tracker/* (CitizenGraph timeline, GDrive diff, SMTP notify)
+│   │   ├── router_review.py         # /api/router/review, /api/router/approve
+│   │   ├── database.py              # /api/db/* (SQLite table viewer & note/memory deletion)
+│   │   └── settings.py              # /api/settings/* (Allowlisted apps.json editor & task detector)
+│   ├── core/                        # Core routing, orchestration, memory & LLM isolation
+│   │   ├── clearance.py             # Single-tier Level 5 Architect manager & intent registry
+│   │   ├── router.py                # Layer 1 Pre-normalizer & deterministic regex intent router
+│   │   ├── context_buffer.py        # Layer 2 Stateful 120s TTL ordinal & pronoun context buffer
+│   │   ├── semantic_router.py       # Layer 3 FastEmbed ONNX vector router & margin-gated clarification
+│   │   ├── orchestrator.py          # Central command dispatcher, semantic cache & turn telemetry
+│   │   ├── actions.py               # Allowlisted app/task runner, PendingStore & system power commands
+│   │   ├── apps_config.py           # Atomic apps.json validator & rotating backup manager
+│   │   ├── memory.py                # Session memory condensation & relevance recall
+│   │   └── llm.py                   # Sandboxed Antigravity CLI (agy) subprocess wrapper
+│   ├── tools/                       # Deterministic local Python & Win32 tools
+│   │   ├── audit.py                 # SQLite store (turns, actions, memories, caches, defense Q&A, timeline)
+│   │   ├── file_navigator.py        # Hybrid trigram/phonetic file indexer & safe launcher
+│   │   ├── ppt_controller.py        # Zero-dependency .pptx XML parser & persistent COM controller
+│   │   ├── ppt_worker.ps1           # Persistent PowerShell COM worker for sub-15ms slide control
+│   │   ├── team_tracker.py          # 4-tab OpenXML workbook parser & GDrive diff engine
+│   │   ├── email_notifier.py        # Gmail/IMAP priority sync & confirmation-gated SMTP nudger
+│   │   ├── defense_copilot.py       # Defense stopwatch, slide pacing & offline semantic answer scorer
+│   │   ├── defense_qa_data.py       # 54 pre-computed CitizenGraph thesis defense Q&A pairs
+│   │   ├── system_telemetry.py      # Win32 kernel32 CPU/RAM/Battery metrics & daemon process poller
+│   │   ├── workspace.py             # Desktop Git scanner, briefings & concurrent GitHub CLI checker
+│   │   ├── rag.py                   # Local FastEmbed document chunk retriever
+│   │   ├── fs_reader.py             # Boundary-checked markdown/text reader
+│   │   └── weather.py               # Cached weather fetcher with background prefetcher
+│   └── tests/                       # Pytest unit, integration, security & Playwright browser test suite
+└── frontend/
+    └── src/
+        ├── App.jsx                  # Root coordinator, SSE listener, speech loop & modal controller
+        ├── api.js                   # Typed REST client & AuthError handler
+        ├── slashCommands.js         # Slash command registry & autocomplete metadata
+        ├── components/              # Modular React UI components
+        │   ├── Level5View.jsx       # Primary desktop HUD (Infernal Command Center)
+        │   ├── Orb.jsx              # Animated Crimson Cosmic Eye Sigil SVG
+        │   ├── NodeGraph.jsx        # Interactive branching category & project graph
+        │   ├── TeamProgressPanel.jsx# 4-Tab CitizenGraph Timeline, Diff & Priority Inbox modal
+        │   ├── DefensePanel.jsx     # Thesis Defense Co-Pilot HUD
+        │   ├── DatabasePanel.jsx    # SQLite inspector modal
+        │   ├── SettingsPanel.jsx    # Allowlisted apps & tasks editor modal
+        │   ├── MiniView.jsx         # Compact Ctrl+Alt+N floating window view
+        │   ├── PhoneView.jsx        # Mobile 4-tab read-only Tailscale view
+        │   └── ...                  # StatusBar, Terminal, Composer, Dossier, ConfirmDialog, etc.
+        └── utils/
+            └── useSpeech.js         # Web Speech API recognizer + progressive streaming TTS chunker
+```
 
 ---
 
-## Safety & Security Model
-
-- **The LLM Never Decides Actions:** All intent routing is governed deterministically by Regex, local FastEmbed ONNX vectors, and allowlist configurations. `agy` only summarizes text or engages in conversational chat; it never selects actions or executes system calls.
-- **The LLM Never Gets a Shell or Filesystem Path:** Project files reach `agy` strictly as sanitized, quoted text. Sensitive variables, tokens, and API keys are scrubbed before invocation, and `agy` executes inside an isolated scratch directory.
-- **Strict Boundary Traversal Defense:** Python file readers, `file_navigator`, `ppt_controller`, and `team_tracker` strictly validate path boundaries against allowed user roots (`Desktop`, `Documents`, `Downloads`). They reject `.env`, credentials, secrets, private keys, `.git`, `node_modules`, and Windows system folders.
-- **No `shell=True`:** All system subprocesses launch from discrete argument lists; `.cmd`/`.bat` launchers reject special characters.
-- **Mandatory Click Confirmations:** Tasks added or edited in Settings, dev tasks, PowerPoint launches, PC reboot/shutdown, and email notifications enforce mandatory confirmations (`needs_confirm=True`). Voice commands cannot bypass confirmation without Level 5 authorization.
-- **Localhost Binding & Origin Checks:** The backend binds strictly to `127.0.0.1`. Requests require local `Host` headers (preventing DNS rebinding) and verified `Origin` headers.
-- **Protected Settings & Database:** Settings changes and database inspection require explicit authentication. Saves are validated, atomic, backed up (retaining the last 5 in `backend\backups\`), and refuse to overwrite manual edits.
-- **Audit Logging:** Every activity, confirmation, model call, and timeline state is logged to `backend\nightmare.db` (auto-pruned after `LOG_RETENTION_DAYS`).
-
----
-
-## Install & Setup (Windows PowerShell)
+## Installation & Quick Start (Windows PowerShell)
 
 ### Prerequisites
-- Windows 11 / 10
-- Python 3.11+ (in PATH or venv)
-- Node.js 20.19+ or 22.12+
-- Google Chrome
-- Antigravity CLI (`agy`) signed in to your Google AI Pro account
+- **OS:** Windows 10 / 11
+- **Python:** 3.11+
+- **Node.js:** 20.19+ or 22.12+
+- **Browser:** Google Chrome or Microsoft Edge (for Web Speech API voice recognition)
+- **AI CLI:** Antigravity CLI (`agy`) authenticated with your Google AI Pro account
 
-### Installation
+### Setup & Launch
 ```powershell
 cd project-nightmare
-.\scripts\install.ps1                 # Initializes venv, installs dependencies, builds frontend, configures backend\.env
+.\scripts\install.ps1                 # Creates .venv, installs Python & npm deps, builds frontend, initializes backend/.env
 .\scripts\start_nightmare.ps1 -Background
 ```
 
-Open **http://127.0.0.1:8000** (or your configured `NIGHTMARE_PORT`) in Google Chrome and enter your laptop PIN.
+Open **http://127.0.0.1:8000** in Chrome and enter your laptop PIN (`NIGHTMARE_PIN` in `backend/.env`).
 
-`install.ps1` options:
-- `-Autostart`: Registers Nightmare in Windows startup (backend + hotkey helper).
-- `-Shortcut`: Creates a Desktop shortcut that launches Nightmare in an app-mode Chrome window.
-- `-Dev`: Installs developer and testing tools (`pytest`, `playwright`).
+Optional `install.ps1` flags:
+- `-Dev`: Installs test dependencies (`pytest`, `playwright`).
+- `-Autostart`: Registers Nightmare and the `Ctrl+Alt+N` hotkey helper to launch at Windows sign-in.
+- `-Shortcut`: Adds a Desktop shortcut that opens Nightmare in a chromeless app window.
 
 ---
 
 ## Configuration (`backend/.env`)
 
+Copy `backend/.env.example` to `backend/.env` (automatically handled by `install.ps1`):
+
 | Variable | Description |
 |---|---|
-| `NIGHTMARE_TOKEN` | Required. Secret session API token. |
-| `DESKTOP_ROOT` | Allowed root directory (defaults to user's `Desktop` or `OneDrive\Desktop`). |
-| `NIGHTMARE_PIN` | 6-digit PIN for laptop browser session authentication. |
-| `NIGHTMARE_PHONE_PIN` | 6-digit PIN for read-only phone sessions over Tailscale. |
-| `NIGHTMARE_L3_PIN` | Level 3 Operator clearance PIN (defaults to `NIGHTMARE_PIN`). |
-| `NIGHTMARE_L5_PASSWORD` | Level 5 Architect clearance secret password. |
-| `NIGHTMARE_ALLOWED_HOSTS` | Comma-separated Tailscale hostnames for phone access. |
-| `NIGHTMARE_HOTKEY` | Global hotkey for mini-window toggle (default: `ctrl+alt+n`). |
-| `NIGHTMARE_TEAM_EXCEL_PATH` | Path to local Google Drive / OneDrive synced timeline `.xlsx`. |
-| `NIGHTMARE_TEAM_GDRIVE_FOLDER_URL` | Shared Google Drive folder URL for team timeline cross-referencing. |
-| `SMTP_HOST`, `SMTP_PORT` | SMTP server settings for team quota email reminders (default: `smtp.gmail.com:587`). |
-| `SMTP_USER`, `SMTP_APP_PASSWORD` | Credentials for sending approved email reminders. |
-| `LOG_RETENTION_DAYS` | Number of days to retain activity audit logs (default: `90`). |
+| `NIGHTMARE_TOKEN` | Required. Random 64-hex secret session token. |
+| `DESKTOP_ROOT` | Root directory for project scanning (defaults to user `Desktop` or `OneDrive\Desktop`). |
+| `NIGHTMARE_PIN` | 6-digit PIN for local desktop browser login (leave blank to disable local PIN lock). |
+| `NIGHTMARE_PHONE_PIN` | 6-digit PIN for read-only remote phone sessions over Tailscale. |
+| `NIGHTMARE_ALLOWED_HOSTS` | Comma-separated `<machine>.<tailnet>.ts.net` hostnames for Tailscale access. |
+| `NIGHTMARE_HOTKEY` | Global hotkey for the mini-window toggle (default: `ctrl+alt+n`). |
+| `NIGHTMARE_TEAM_EXCEL_PATH` | Local path to the synced CitizenGraph `.xlsx` timeline workbook. |
+| `NIGHTMARE_TEAM_GDRIVE_FOLDER_URL` | Shared Google Drive folder URL for timeline sync. |
+| `NIGHTMARE_DEVELOPER_PORTFOLIO_URL` | Portfolio URL opened by `"open adrian portfolio"`. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_APP_PASSWORD` | SMTP credentials for confirmation-gated team reminder emails. |
+| `LOG_RETENTION_DAYS` | Days to retain SQLite audit logs and raw turns (default: `90`). |
 
 ---
 
-## Development & Testing
+## Phone Access (Tailscale, Strictly Read-Only)
+
+1. Install Tailscale on both your Windows PC and Android phone under the same tailnet, and enable **MagicDNS** + **HTTPS Certificates**.
+2. Set `NIGHTMARE_PHONE_PIN` (6+ digits) and `NIGHTMARE_ALLOWED_HOSTS` in `backend/.env`.
+3. Run `.\scripts\setup_tailscale.ps1 -Restart` and open the printed `https://<laptop>.<tailnet>.ts.net/` URL on your phone.
+
+All Tailscale requests are enforced read-only (`readonly=True`) at the router and orchestrator layers.
+
+---
+
+## Development & Verification Commands
 
 ```powershell
-# Set up development tools and test environment
-.\scripts\install.ps1 -Dev
-
-# Run fast backend unit & integration tests (~20s, 341 tests pass, 1 skipped)
+# 1. Run backend unit & integration test suite (fast, excludes Playwright browser launch)
 .\.venv\Scripts\python.exe -m pytest backend -q -m "not browser"
 
-# Run all backend tests including Playwright Chrome browser tests (~1 min, 349 tests pass)
+# 2. Run full backend test suite including Playwright browser tests
 .\.venv\Scripts\python.exe -m pytest backend -q
 
-# Run frontend unit tests (5 tests pass)
+# 3. Run offline router accuracy & latency replay harness
+.\.venv\Scripts\python.exe scripts\replay_router.py
+
+# 4. Run frontend unit tests & production bundle build
 cd frontend; npm test
+cd frontend; npm run build
 
-# Run coldstart benchmark & warmup checks
-.\.venv\Scripts\python.exe scripts\coldstart.py
-
-# Rebuild frontend and restart Nightmare
+# 5. Rebuild frontend dist and restart Nightmare server
 .\scripts\start_nightmare.ps1 -Rebuild
 ```
-
----
-
-## Codebase Map
-
-| Path | Description |
-|---|---|
-| `backend/main.py` | FastAPI application, authentication middleware, clearance endpoints, team tracker REST APIs. |
-| `backend/config.py` | Configuration settings parsed from `backend/.env`. |
-| `backend/hotkey.py` | Windows global hotkey hook (`Ctrl+Alt+N`) for summon, resize, and hide via `ctypes`. |
-| `backend/core/clearance.py` | 3-Tier Security Clearance manager (`ClearanceManager`), intent maps, and inactivity decay. |
-| `backend/core/router.py` | Deterministic regex intent router matching voice and text commands. |
-| `backend/core/semantic_router.py` | FastEmbed ONNX semantic vector router with RAM-cached embeddings and instant warmup. |
-| `backend/core/orchestrator.py` | Central dispatch, summary caches, clearance validation, and tool execution. |
-| `backend/core/actions.py` | Action registry, confirmation store (`PendingStore`), and system authority executors. |
-| `backend/core/apps_config.py` | Allowlist settings validator, atomic configuration file persistence, and automatic backups. |
-| `backend/core/memory.py` | Conversation turn logging, session memory condensation, and relevance recall. |
-| `backend/core/llm.py` | Antigravity CLI (`agy`) headless subprocess wrapper with scratch folder isolation. |
-| `backend/tools/file_navigator.py` | Safe multi-directory file indexing, path traversal defense, and deterministic file opening. |
-| `backend/tools/ppt_controller.py` | Zero-dependency OpenXML PowerPoint slide parser, COM automation, and slide-show controller. |
-| `backend/tools/team_tracker.py` | Zero-dependency OpenXML 4-tab workbook parser, live metric rollups, and GDrive diff engine. |
-| `backend/tools/email_notifier.py` | `smtplib` notification builder with Level 5 confirmation workflow for stale team tasks. |
-| `backend/tools/workspace.py` | Workspace git branch/dirty scanning, TODO analysis, daily briefings, and GitHub CLI checks. |
-| `backend/tools/rag.py` | Local document RAG retriever using RAM-cached FastEmbed embeddings. |
-| `backend/tools/audit.py` | SQLite audit store for actions, LLM calls, memories, indexed files, team tasks, and timeline states. |
-| `backend/tools/fs_reader.py` | Safe document and handoff reader with symlink resolution and sensitive file protection. |
-| `backend/tools/weather.py` | Weather information fetcher with 10-minute caching. |
-| `frontend/src/App.jsx` | Main React entry point, status indicators, panel routing, and layout coordinator. |
-| `frontend/src/components/ClearanceModal.jsx` | Authentication modal for Level 3 PIN and Level 5 password elevation. |
-| `frontend/src/components/TeamProgressPanel.jsx` | Desktop command center for 4-tab CitizenGraph telemetry, GDrive diffs, and email controls. |
-| `frontend/src/components/NodeGraph.jsx` | Interactive project graph visualization rendered with GSAP. |
-| `frontend/src/components/MiniView.jsx` | Always-on-top compact floating window for Ctrl+Alt+N hotkey access. |
-| `frontend/src/components/PhoneView.jsx` | Mobile-optimized 4-tab interface (Talk, Projects, Reminders, Chat) for Tailscale users. |
-| `frontend/src/components/StatusBar.jsx` | Clearance level badge, speech recognition language toggle, and connection indicators. |
-| `frontend/src/utils/useSpeech.js` | Chrome Web Speech API integration, dual voice selection, and speed regulation. |
-| `scripts/` | PowerShell automation scripts: installation, startup, autostart, smoke tests, and Tailscale setup. |

@@ -7,12 +7,14 @@ for active presentation slide navigation.
 from __future__ import annotations
 
 from difflib import SequenceMatcher
+import atexit
 import logging
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import threading
 from typing import TYPE_CHECKING
 import zipfile
 import xml.etree.ElementTree as ET
@@ -208,38 +210,104 @@ def find_slide_by_topic(file_path: Path | str, topic: str) -> int | None:
 
 
 # ==============================================================================
-# 2. COM Automation Adapter (pywin32 / PowerShell Interop)
+# 2. COM Automation Adapter (Persistent PowerShell / pywin32 Worker)
 # ==============================================================================
 
-def _run_powershell(script: str) -> tuple[bool, str]:
-    """Executes a PowerShell script and captures output/error."""
-    if sys.platform != "win32":
-        return False, "PowerPoint COM automation is only supported on Windows."
+class PowerShellWorker:
+    """Persistent PowerShell COM worker process communicating over stdin/stdout pipes."""
 
-    cmd = [
-        "powershell.exe",
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        script,
-    ]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        out = (proc.stdout or "").strip()
-        err = (proc.stderr or "").strip()
-        if proc.returncode == 0:
-            return True, out or "OK"
-        return False, err or out or f"PowerPoint command failed with exit code {proc.returncode}."
-    except subprocess.TimeoutExpired:
-        return False, "PowerPoint command timed out after 15 seconds."
-    except Exception as exc:
-        return False, f"PowerPoint command error: {exc}"
+    def __init__(self, script_path: Path):
+        self.script_path = script_path
+        self._proc: subprocess.Popen | None = None
+        self._lock = threading.Lock()
+
+    def _ensure_proc(self) -> subprocess.Popen | None:
+        if sys.platform != "win32":
+            return None
+        if self._proc is not None and self._proc.poll() is None:
+            return self._proc
+
+        if not self.script_path.is_file():
+            logger.error("PowerPoint worker script not found at %s", self.script_path)
+            return None
+
+        try:
+            self._proc = subprocess.Popen(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(self.script_path),
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+            return self._proc
+        except Exception as exc:
+            logger.debug("Failed spawning PowerPoint worker process: %s", exc)
+            self._proc = None
+            return None
+
+    def send_command(self, cmd: str) -> tuple[bool, str]:
+        if sys.platform != "win32":
+            return False, "PowerPoint COM automation is only supported on Windows."
+
+        with self._lock:
+            proc = self._ensure_proc()
+            if not proc or proc.poll() is not None:
+                return False, "PowerPoint automation worker is unavailable."
+
+            try:
+                proc.stdin.write(cmd.strip() + "\n")
+                proc.stdin.flush()
+
+                line = proc.stdout.readline()
+                if not line:
+                    self.close()
+                    return False, "PowerPoint worker process disconnected."
+
+                clean = line.strip()
+                if clean.startswith("OK:"):
+                    return True, clean[3:].strip() or "OK"
+                elif clean.startswith("ERROR:"):
+                    return False, clean[6:].strip() or "PowerPoint command failed."
+                return True, clean
+            except Exception as exc:
+                logger.debug("PowerPoint worker command error: %s", exc)
+                self.close()
+                return False, f"PowerPoint command error: {exc}"
+
+    def close(self) -> None:
+        if self._proc is not None:
+            try:
+                if self._proc.poll() is None and self._proc.stdin:
+                    self._proc.stdin.write("__EXIT__\n")
+                    self._proc.stdin.flush()
+                    self._proc.wait(timeout=1.0)
+            except Exception:
+                try:
+                    self._proc.kill()
+                except Exception:
+                    pass
+            finally:
+                self._proc = None
 
 
 class PPTCOMAdapter:
-    """Handles PowerPoint COM automation with pywin32 or PowerShell COM fallback."""
+    """Handles PowerPoint COM automation via persistent PowerShell/COM worker."""
+
+    def __init__(self, worker: PowerShellWorker | None = None):
+        if worker is None:
+            script_file = Path(__file__).parent / "ppt_worker.ps1"
+            self._worker: PowerShellWorker | None = PowerShellWorker(script_file)
+        else:
+            self._worker = worker
 
     def open_presentation_at_slide(self, file_path: str, slide_number: int = 1) -> tuple[bool, str]:
         # Try win32com first if available
@@ -260,34 +328,41 @@ class PPTCOMAdapter:
         except ImportError:
             pass
         except Exception as exc:
-            logger.debug("win32com failed, falling back to PowerShell: %s", exc)
+            logger.debug("win32com failed, falling back to persistent PowerShell worker: %s", exc)
 
-        # PowerShell COM fallback
-        escaped_path = os.path.abspath(file_path).replace("'", "''")
-        script = f"""
-$ErrorActionPreference = 'Stop'
-$path = '{escaped_path}'
-try {{
-    $ppt = [Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application')
-}} catch {{
-    $ppt = New-Object -ComObject PowerPoint.Application
-}}
-$ppt.Visible = 1
-$pres = $ppt.Presentations.Open($path)
-$ss = $pres.SlideShowSettings.Run()
-if ($ss -and $ss.View) {{
-    $ss.View.GotoSlide({int(slide_number)})
-}} elseif ($ppt.ActiveWindow -and $ppt.ActiveWindow.View) {{
-    $ppt.ActiveWindow.View.GotoSlide({int(slide_number)})
-}}
-Write-Output "OK"
-"""
-        return _run_powershell(script)
+        if not self._worker:
+            return False, "PowerPoint automation worker not configured."
+        escaped_path = os.path.abspath(file_path).replace("|", "")
+        return self._worker.send_command(f"OPEN|{escaped_path}|{int(slide_number)}")
+
+    def start_slideshow(self) -> tuple[bool, str]:
+        try:
+            import win32com.client
+            ppt = win32com.client.GetActiveObject("PowerPoint.Application")
+            if ppt.Presentations.Count > 0:
+                ppt.ActivePresentation.SlideShowSettings.Run()
+                return True, "Slide show started."
+            return False, "No presentation is open in PowerPoint."
+        except ImportError:
+            pass
+        except Exception as exc:
+            logger.debug("win32com start_slideshow failed: %s", exc)
+
+        if not self._worker:
+            return False, "PowerPoint automation worker not configured."
+        return self._worker.send_command("START")
 
     def goto_slide(self, slide_number: int) -> tuple[bool, str]:
         try:
             import win32com.client
             ppt = win32com.client.GetActiveObject("PowerPoint.Application")
+            if ppt.Presentations.Count == 0:
+                return False, "No presentation is open in PowerPoint."
+            if ppt.SlideShowWindows.Count == 0:
+                try:
+                    ppt.ActivePresentation.SlideShowSettings.Run()
+                except Exception:
+                    pass
             if ppt.SlideShowWindows.Count > 0:
                 ppt.SlideShowWindows(1).View.GotoSlide(int(slide_number))
             elif hasattr(ppt, "ActiveWindow") and ppt.ActiveWindow:
@@ -296,24 +371,23 @@ Write-Output "OK"
         except ImportError:
             pass
         except Exception as exc:
-            logger.debug("win32com goto_slide failed, falling back to PowerShell: %s", exc)
+            logger.debug("win32com goto_slide failed, falling back to persistent worker: %s", exc)
 
-        script = f"""
-$ErrorActionPreference = 'Stop'
-$ppt = [Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application')
-if ($ppt.SlideShowWindows.Count -gt 0) {{
-    $ppt.SlideShowWindows.Item(1).View.GotoSlide({int(slide_number)})
-}} elseif ($ppt.ActiveWindow -and $ppt.ActiveWindow.View) {{
-    $ppt.ActiveWindow.View.GotoSlide({int(slide_number)})
-}}
-Write-Output "OK"
-"""
-        return _run_powershell(script)
+        if not self._worker:
+            return False, "PowerPoint automation worker not configured."
+        return self._worker.send_command(f"GOTO|{int(slide_number)}")
 
     def next_slide(self) -> tuple[bool, str]:
         try:
             import win32com.client
             ppt = win32com.client.GetActiveObject("PowerPoint.Application")
+            if ppt.Presentations.Count == 0:
+                return False, "No presentation is open in PowerPoint."
+            if ppt.SlideShowWindows.Count == 0:
+                try:
+                    ppt.ActivePresentation.SlideShowSettings.Run()
+                except Exception:
+                    pass
             if ppt.SlideShowWindows.Count > 0:
                 ppt.SlideShowWindows(1).View.Next()
             elif hasattr(ppt, "ActiveWindow") and ppt.ActiveWindow:
@@ -327,30 +401,23 @@ Write-Output "OK"
         except ImportError:
             pass
         except Exception as exc:
-            logger.debug("win32com next_slide failed, falling back to PowerShell: %s", exc)
+            logger.debug("win32com next_slide failed, falling back to persistent worker: %s", exc)
 
-        script = """
-$ErrorActionPreference = 'Stop'
-$ppt = [Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application')
-if ($ppt.SlideShowWindows.Count -gt 0) {
-    $ppt.SlideShowWindows.Item(1).View.Next()
-} elseif ($ppt.ActiveWindow -and $ppt.ActiveWindow.View) {
-    try {
-        $cur = $ppt.ActiveWindow.View.Slide.SlideIndex
-        $max = $ppt.ActivePresentation.Slides.Count
-        if ($cur -lt $max) { $ppt.ActiveWindow.View.GotoSlide($cur + 1) }
-    } catch {
-        try { $ppt.ActiveWindow.View.Next() } catch {}
-    }
-}
-Write-Output "OK"
-"""
-        return _run_powershell(script)
+        if not self._worker:
+            return False, "PowerPoint automation worker not configured."
+        return self._worker.send_command("NEXT")
 
     def previous_slide(self) -> tuple[bool, str]:
         try:
             import win32com.client
             ppt = win32com.client.GetActiveObject("PowerPoint.Application")
+            if ppt.Presentations.Count == 0:
+                return False, "No presentation is open in PowerPoint."
+            if ppt.SlideShowWindows.Count == 0:
+                try:
+                    ppt.ActivePresentation.SlideShowSettings.Run()
+                except Exception:
+                    pass
             if ppt.SlideShowWindows.Count > 0:
                 ppt.SlideShowWindows(1).View.Previous()
             elif hasattr(ppt, "ActiveWindow") and ppt.ActiveWindow:
@@ -364,27 +431,19 @@ Write-Output "OK"
         except ImportError:
             pass
         except Exception as exc:
-            logger.debug("win32com previous_slide failed, falling back to PowerShell: %s", exc)
+            logger.debug("win32com previous_slide failed, falling back to persistent worker: %s", exc)
 
-        script = """
-$ErrorActionPreference = 'Stop'
-$ppt = [Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application')
-if ($ppt.SlideShowWindows.Count -gt 0) {
-    $ppt.SlideShowWindows.Item(1).View.Previous()
-} elseif ($ppt.ActiveWindow -and $ppt.ActiveWindow.View) {
-    try {
-        $cur = $ppt.ActiveWindow.View.Slide.SlideIndex
-        if ($cur -gt 1) { $ppt.ActiveWindow.View.GotoSlide($cur - 1) }
-    } catch {
-        try { $ppt.ActiveWindow.View.Previous() } catch {}
-    }
-}
-Write-Output "OK"
-"""
-        return _run_powershell(script)
+        if not self._worker:
+            return False, "PowerPoint automation worker not configured."
+        return self._worker.send_command("PREV")
+
+    def close(self) -> None:
+        if self._worker:
+            self._worker.close()
 
 
 _global_adapter: PPTCOMAdapter = PPTCOMAdapter()
+atexit.register(lambda: _global_adapter.close())
 
 
 def get_com_adapter() -> PPTCOMAdapter:
@@ -401,6 +460,14 @@ def set_com_adapter(adapter: PPTCOMAdapter) -> None:
 # ==============================================================================
 # 3. High-level Controller API
 # ==============================================================================
+
+def start_presentation() -> tuple[bool, str]:
+    """Starts the slide show presentation if a presentation is open."""
+    ok, msg = get_com_adapter().start_slideshow()
+    if ok:
+        return True, "Slide show presentation started."
+    return False, f"Could not start presentation: {msg}"
+
 
 def open_ppt_at_slide(
     file_path: str,

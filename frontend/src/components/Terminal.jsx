@@ -1,4 +1,4 @@
-﻿import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import gsap from 'gsap'
 import Icon, { Sigil } from './Icon'
 
@@ -77,7 +77,7 @@ function Entry({ entry, onSpeak }) {
           >
             <Icon name="external" size={13} className="shrink-0 text-ember" />
             <span className="truncate">
-              {entry.link.blocked ? 'Your browser blocked the new tab. Open it here' : 'Open again'}
+              {entry.link.label || (entry.link.blocked ? 'Your browser blocked the new tab. Open it here' : 'Open again')}
             </span>
           </a>
         )}

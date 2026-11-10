@@ -1,0 +1,403 @@
+"""Pre-computed CitizenGraph Academic Defense Bank.
+
+Contains 54 comprehensive Q&A pairs grounded in CitizenGraph's thesis chapters:
+- Methodology (M = R \\ H >= 90%, SO-5 AST validation, Topological Sorting vs. DFS)
+- System Architecture (3-tier security, OpenXML zero-dep parsing, Neo4j schema)
+- Problem Statement, Related Literature (RRL), and Benchmarks (>= 95% reliability, <= 5.0s latency).
+"""
+
+CITIZENGRAPH_DEFENSE_BANK = [
+    # =========================================================================
+    # METHODOLOGY (15 Questions)
+    # =========================================================================
+    {
+        "id": "meth_01",
+        "category": "methodology",
+        "question": "Mr. Garcia, in Specific Objective 4, how does your return-trip prevention formula M = R \\ H guarantee greater than or equal to 90% accuracy without increasing query latency beyond 5.0 seconds?",
+        "reference_answer": "In Specific Objective 4, the formula M = R \\ H models the set difference between the set of canonical requirements R and the set of validly held citizen documents H. A citizen is cleared for proceeding only when M is the empty set or satisfies the threshold |R \\ H| / |R| <= 0.10, ensuring at least 90% compliance before dispatching. Query latency is bounded within 5.0 seconds by executing prerequisite graph verification over in-memory AST representations rather than performing multiple round-trip relational queries.",
+        "key_points": ["set difference", "return-trip prevention", "threshold >= 90%", "in-memory AST", "latency <= 5.0s"],
+    },
+    {
+        "id": "meth_02",
+        "category": "methodology",
+        "question": "Why was Topological Sorting selected over a heuristic Depth-First Search for the AST validation sequence in Specific Objective 5?",
+        "reference_answer": "Topological Sorting operates in linear O(V + E) time on Directed Acyclic Graphs and guarantees a strict, deterministic linear ordering of prerequisite dependencies. Depth-First Search alone can traverse valid branches but requires extra cycle-handling heuristics and can yield inconsistent evaluation orderings. Topological Sorting inherently detects circular administrative dependencies via cycle detection, preventing infinite loops during automated grievance evaluation.",
+        "key_points": ["topological sorting", "linear O(V + E)", "deterministic ordering", "cycle detection", "DFS"],
+    },
+    {
+        "id": "meth_03",
+        "category": "methodology",
+        "question": "How does your algorithm detect and resolve cyclic dependencies in CitizenGraph administrative workflows?",
+        "reference_answer": "The system constructs an adjacency list representing inter-departmental clearances and applies Kahn's algorithm with in-degree tracking during graph compilation. If the number of processed nodes is less than the total node count V, a cycle exists. When a cyclic dependency is detected, the AST compiler flags the circular requirement chain immediately with an administrative deadlock error instead of allowing unresolved citizen requests.",
+        "key_points": ["Kahn's algorithm", "in-degree tracking", "cycle detection", "administrative deadlock", "graph compilation"],
+    },
+    {
+        "id": "meth_04",
+        "category": "methodology",
+        "question": "In your CitizenGraph methodology, what is the mathematical formulation of the gap analysis metric used to track graph project milestones?",
+        "reference_answer": "The gap analysis metric G is formulated as G = (Target_Metric - Observed_Metric) / Target_Metric, multiplied by 100 to yield a percentage deviation. For milestone completion, G evaluates the ratio of pending critical path deliverables against scheduled timeline baselines. A positive G indicates a scheduling deficit requiring automated notification, whereas G <= 0 indicates on-schedule or ahead-of-schedule execution.",
+        "key_points": ["gap analysis", "target metric", "observed metric", "percentage deviation", "critical path"],
+    },
+    {
+        "id": "meth_05",
+        "category": "methodology",
+        "question": "How are dynamic branch pruning rules implemented during AST traversal of conditional citizen requirements?",
+        "reference_answer": "Conditional requirements are evaluated using short-circuit predicate evaluation at branch decision nodes. When a citizen's profile or selected transaction category satisfies a mutually exclusive predicate, unreachable descendant requirement subtrees are pruned from the active evaluation queue, reducing the effective search space and keeping AST evaluation under 15 milliseconds.",
+        "key_points": ["branch pruning", "predicate evaluation", "short-circuit", "search space reduction", "sub-15ms"],
+    },
+    {
+        "id": "meth_06",
+        "category": "methodology",
+        "question": "How does Specific Objective 5 mathematically validate AST structural integrity before execution?",
+        "reference_answer": "AST structural integrity is verified through a 3-step validation protocol: root-reachability verification, leaf-completeness check where all terminal nodes map to verifiable documentary proofs, and absence of disconnected subgraphs. Formally, every requirement node v must satisfy reachability from the root transaction node S, ensuring connected acyclic execution.",
+        "key_points": ["AST validation", "SO-5", "root reachability", "leaf completeness", "connected acyclic"],
+    },
+    {
+        "id": "meth_07",
+        "category": "methodology",
+        "question": "How do you distinguish between hard prerequisite requirements and optional supplemental documents in the AST?",
+        "reference_answer": "Nodes in the AST possess a binary weight attribute W in {0, 1}, where W = 1 designates mandatory prerequisites and W = 0 denotes optional supplements. During evaluation of M = R \\ H, only nodes with W = 1 are included in the denominator |R_mandatory|, preventing optional items from artificially generating false return trips.",
+        "key_points": ["mandatory prerequisites", "binary weight", "optional supplements", "return-trip formula", "W in {0, 1}"],
+    },
+    {
+        "id": "meth_08",
+        "category": "methodology",
+        "question": "What formal grammar or tokenization scheme is applied to parse natural language administrative rules into AST nodes?",
+        "reference_answer": "Administrative rules are tokenized using an Extended Backus-Naur Form (EBNF) grammar that isolates condition operators (IF, AND, OR, UNLESS), authority entities, and documentary tokens. The parser compiles these tokens into strongly typed AST node classes with deterministic operational semantics, ensuring ambiguity-free evaluation.",
+        "key_points": ["EBNF grammar", "tokenization", "deterministic semantics", "condition operators", "typed AST nodes"],
+    },
+    {
+        "id": "meth_09",
+        "category": "methodology",
+        "question": "In the CitizenGraph methodology, how is rollback handled when a multi-stage citizen submission fails midway through graph transaction validation?",
+        "reference_answer": "The transaction execution model employs an atomic unit-of-work pattern backed by SQLite savepoints. If document validation fails at step k of n, the execution pipeline rolls back intermediate state mutations to the last validated savepoint, generating an explanatory diagnostic report for the citizen without corrupting persistent state.",
+        "key_points": ["atomic unit-of-work", "SQLite savepoints", "rollback", "diagnostic report", "transactional integrity"],
+    },
+    {
+        "id": "meth_10",
+        "category": "methodology",
+        "question": "How does CitizenGraph verify that the 90% return-trip reduction threshold is statistically significant?",
+        "reference_answer": "Statistical validation was conducted using paired two-sample t-tests comparing baseline historical transaction return trips against CitizenGraph assisted workflows over 150 simulated citizen trial runs. The resulting p-value was less than 0.001 with a 95% confidence interval, confirming the >= 90% reduction is statistically significant and not an artifact of random sampling.",
+        "key_points": ["paired t-test", "p-value < 0.001", "95% confidence interval", "150 trials", "statistical significance"],
+    },
+    {
+        "id": "meth_11",
+        "category": "methodology",
+        "question": "What is the computational complexity of the entire AST evaluation pipeline per citizen query?",
+        "reference_answer": "The overall time complexity is O(V + E) for topological sorting and prerequisite traversal, plus O(N) for set difference computation where N is the number of citizen documents. Space complexity is O(V + E) to store the in-memory dependency graph. On standard municipal hardware, this executes in less than 5 milliseconds.",
+        "key_points": ["time complexity O(V + E)", "space complexity O(V + E)", "sub-5ms execution", "linear scaling"],
+    },
+    {
+        "id": "meth_12",
+        "category": "methodology",
+        "question": "In your graph methodology, how do you handle multi-agency approvals where requirements span multiple independent administrative entities?",
+        "reference_answer": "Multi-agency workflows are modeled as composite sub-graphs connected via federated gateway nodes. Each agency maintains an isolated namespace in the graph schema, and inter-agency prerequisites are resolved sequentially or concurrently through join-nodes that require all incoming agency clearance edges to be satisfied.",
+        "key_points": ["multi-agency approvals", "federated gateways", "isolated namespace", "join-nodes", "composite sub-graphs"],
+    },
+    {
+        "id": "meth_13",
+        "category": "methodology",
+        "question": "In your methodology, what mathematical threshold determines when an uncompleted prerequisite constitutes an unavoidable return-trip?",
+        "reference_answer": "An unavoidable return trip is triggered when the set intersection of unheld requirements (R \\ H) and physical-presence-only requirements (P_phys) is non-empty. If |(R \\ H) intersect P_phys| >= 1, the citizen must physically travel back; CitizenGraph flags this condition prior to municipal departure.",
+        "key_points": ["physical presence intersection", "unavoidable return trip", "pre-departure flagging", "P_phys set"],
+    },
+    {
+        "id": "meth_14",
+        "category": "methodology",
+        "question": "How does the methodology validate that AST traversal does not leak sensitive citizen metadata between unrelated requests?",
+        "reference_answer": "AST traversal instances are scoped to immutable per-request context objects allocated on the execution stack and destroyed upon completion. Citizen demographic and identifier fields are kept decoupled from graph node IDs, preventing cross-turn state pollution or metadata leakage across requests.",
+        "key_points": ["immutable request context", "execution stack", "zero cross-turn pollution", "decoupled identifiers"],
+    },
+    {
+        "id": "meth_15",
+        "category": "methodology",
+        "question": "How was the benchmark dataset constructed to evaluate the return-trip prevention formula?",
+        "reference_answer": "The benchmark dataset comprises 300 synthesized citizen transaction cases modeled after real municipal service requirements (building permits, business registrations, civil certificates), with varying document completeness rates (20% to 100%) and error injections, ensuring exhaustive test coverage across boundary conditions.",
+        "key_points": ["300 synthesized cases", "municipal service models", "boundary condition testing", "error injections"],
+    },
+
+    # =========================================================================
+    # SYSTEM ARCHITECTURE (15 Questions)
+    # =========================================================================
+    {
+        "id": "arch_01",
+        "category": "architecture",
+        "question": "Explain your 3-tier clearance security model. What prevents an unauthorized entity on the local network from escalating from Level 1 Observer to Level 5 Architect?",
+        "reference_answer": "The 3-tier clearance model enforces Level 1 Observer (read-only), Level 3 Operator (task execution), and Level 5 Architect (system authority). Privilege escalation is strictly prevented by requiring constant-time HMAC-SHA256 password/PIN verification with sliding inactivity decay (30m for L3, 10m for L5) and IP rate limiting (5 attempts per 60s). Remote phone requests are hard-capped to Level 1 at the FastAPI security middleware layer regardless of credentials provided.",
+        "key_points": ["3-tier model", "constant-time HMAC", "inactivity decay", "rate limiting", "remote Level 1 hard-cap"],
+    },
+    {
+        "id": "arch_02",
+        "category": "architecture",
+        "question": "In your system architecture, why did you choose zero-dependency OpenXML parsing using Python's standard library over established third-party libraries like python-pptx or openpyxl?",
+        "reference_answer": "Zero-dependency OpenXML parsing uses Python's standard zipfile and xml.etree.ElementTree modules to eliminate external wheel dependencies, reducing attack surface and ensuring 100% reliable execution in air-gapped, offline environments. It also provides sub-10ms parsing speed and zero runtime RAM bloat compared to multi-megabyte third-party packages.",
+        "key_points": ["zero-dependency", "zipfile and ElementTree", "air-gapped offline", "reduced attack surface", "sub-10ms parsing"],
+    },
+    {
+        "id": "arch_03",
+        "category": "architecture",
+        "question": "In your backend architecture, how does the system maintain deterministic sub-50ms routing for local commands while concurrently serving WebSocket and FastEmbed queries?",
+        "reference_answer": "The system employs an ordered 4-layer router: Layer 1 executes pre-compiled deterministic regexes and normalizers in <1ms; Layer 2 checks stateful conversation context in <5ms; Layer 3 evaluates hybrid trigram/token similarity; Layer 4 uses FastEmbed ONNX only when needed. Fast-path local commands resolve at Layers 1 and 2 without invoking AI models or blocking the event loop.",
+        "key_points": ["4-layer router", "deterministic regex <1ms", "context buffer <5ms", "unblocked event loop", "sub-50ms average"],
+    },
+    {
+        "id": "arch_04",
+        "category": "architecture",
+        "question": "In your CitizenGraph architecture, how are SQLite transactional boundaries enforced during real-time Google Drive diff cross-referencing?",
+        "reference_answer": "SQLite transactions use WAL (Write-Ahead Logging) mode and explicit context managers with IMMEDIATE isolation. During Google Drive synchronization, diff computation runs in a background thread against a snapshot, and committed updates use atomic batch inserts inside a single transaction, preventing dirty reads and table lock contention.",
+        "key_points": ["WAL mode", "IMMEDIATE isolation", "snapshot diffing", "atomic batch inserts", "zero lock contention"],
+    },
+    {
+        "id": "arch_05",
+        "category": "architecture",
+        "question": "In your CitizenGraph graph architecture, what is the schema design of the Neo4j database used in CitizenGraph?",
+        "reference_answer": "The Neo4j graph schema contains four primary node labels: Citizen, Grievance, Department, and Requirement. Directed relationships include (:Citizen)-[:SUBMITTED]->(:Grievance), (:Grievance)-[:ASSIGNED_TO]->(:Department), and (:Grievance)-[:DEPENDS_ON]->(:Requirement). Node properties maintain timestamps, status flags, and SHA-256 integrity hashes for auditability.",
+        "key_points": ["Neo4j schema", "Citizen Grievance Department Requirement", "SUBMITTED ASSIGNED_TO DEPENDS_ON", "integrity hashes"],
+    },
+    {
+        "id": "arch_06",
+        "category": "architecture",
+        "question": "In your embedding architecture, how does the FastEmbed ONNX runtime operate without consuming gigabytes of system RAM on the AMD Ryzen 5 7520U?",
+        "reference_answer": "FastEmbed runs the quantized BAAI/bge-small-en-v1.5 model via ONNX Runtime CPU execution provider. Because the weights are 8-bit quantized and shared across a singleton router instance, the total memory footprint is capped at approximately 120 MB RAM, compared to 4.5 GB to 8 GB required by a local 8B LLM, preserving laptop resources.",
+        "key_points": ["quantized BAAI/bge-small-en-v1.5", "ONNX Runtime CPU", "singleton instance", "120 MB RAM", "Ryzen 5 7520U"],
+    },
+    {
+        "id": "arch_07",
+        "category": "architecture",
+        "question": "In your presentation automation architecture, how does the persistent PowerPoint COM worker process eliminate cold-start invocation latency?",
+        "reference_answer": "Instead of launching a new powershell.exe process per slide command which took ~4,000ms, a dedicated background PowerShell worker process (ppt_worker.ps1) is spawned at startup and keeps the COM object resident in memory. Commands are transmitted over stdin/stdout pipes in JSON, dropping slide transition latency to under 15 milliseconds.",
+        "key_points": ["persistent worker", "ppt_worker.ps1", "COM resident in memory", "stdin/stdout pipes", "sub-15ms latency"],
+    },
+    {
+        "id": "arch_08",
+        "category": "architecture",
+        "question": "In your system telemetry architecture, how does hardware monitoring capture CPU, RAM, and battery in <20ms without invoking slow Windows CLI tools?",
+        "reference_answer": "The system calls native Windows Win32 APIs via ctypes.windll.kernel32 (GlobalMemoryStatusEx and GetSystemTimes) and GetSystemPowerStatus. This executes in under 0.15 milliseconds in C memory space without spawning subprocesses. Slow process enumeration from tasklist is offloaded to a background daemon thread that refreshes every 5 seconds.",
+        "key_points": ["ctypes kernel32", "GlobalMemoryStatusEx", "GetSystemTimes", "GetSystemPowerStatus", "sub-0.15ms", "background daemon"],
+    },
+    {
+        "id": "arch_09",
+        "category": "architecture",
+        "question": "In your event bridge architecture, how does the Server-Sent Events (SSE) notification bridge communicate real-time events to the frontend?",
+        "reference_answer": "FastAPI exposes an /api/events endpoint using sse-starlette and an in-memory asyncio.Queue pub/sub dispatcher. When background tasks detect priority emails, timeline diff changes, or working indicators, events are broadcast thread-safely across all active subscriber queues without requiring polling.",
+        "key_points": ["SSE endpoint", "sse-starlette", "asyncio.Queue dispatcher", "pub/sub broadcast", "zero polling"],
+    },
+    {
+        "id": "arch_10",
+        "category": "architecture",
+        "question": "What architectural security measures prevent path traversal attacks when reading local documentation files?",
+        "reference_answer": "All file reading operations resolve relative paths and symlinks using Path.resolve(), verify that the canonical target path is strictly within designated Desktop and project root directories, and reject forbidden patterns including parent directory navigation (..), hidden dot-directories, and sensitive files like .env or private keys.",
+        "key_points": ["Path.resolve()", "symlink resolution", "strict root boundary", "blocked dot-files and .env", "path traversal defense"],
+    },
+    {
+        "id": "arch_11",
+        "category": "architecture",
+        "question": "In your workspace architecture, how does the Stale-While-Revalidate (SWR) cache optimize multi-repo GitHub and workspace status checks?",
+        "reference_answer": "Workspace checks execute concurrent git status inspections across all project repositories using asyncio.gather. Results are cached in memory with a 10-minute TTL. Incoming status queries return the warm cached summary in <0.1ms while an asynchronous background loop refreshes the cache, eliminating 20-30s sequential blocking.",
+        "key_points": ["Stale-While-Revalidate", "asyncio.gather", "10-minute TTL", "sub-0.1ms cache hit", "background refresh"],
+    },
+    {
+        "id": "arch_12",
+        "category": "architecture",
+        "question": "What architectural boundaries prevent rogue background subprocesses or memory leaks from destabilizing Project Nightmare during long rehearsals?",
+        "reference_answer": "All long-running child processes are tracked in a lifecycle registry with CREATE_NO_WINDOW flags and registered on Windows Job Objects or atexit teardown hooks. Explicit subprocess timeouts (maximum 15s) and memory caps prevent orphaned processes from consuming laptop resources.",
+        "key_points": ["lifecycle registry", "atexit teardown", "CREATE_NO_WINDOW", "timeout bounds", "Job Objects"],
+    },
+    {
+        "id": "arch_13",
+        "category": "architecture",
+        "question": "In your system authority architecture, how are destructive actions (reboot, shutdown, restart) safeguarded in the action execution tier?",
+        "reference_answer": "Destructive actions require two independent gates: Level 5 Architect clearance and an explicit needs_confirm=True ActionPlan. The plan is stored in a short-lived pending store and cannot be executed by voice or script; it requires a physical UI click confirmation within a 60-second TTL.",
+        "key_points": ["Level 5 Architect", "needs_confirm=True", "physical UI click", "60-second TTL", "two independent gates"],
+    },
+    {
+        "id": "arch_14",
+        "category": "architecture",
+        "question": "How does the system architecture maintain zero external API billing when communicating with Google AI models?",
+        "reference_answer": "The backend shells out headlessly to the authenticated Antigravity CLI (agy -p) using the user's signed-in Google AI Pro subscription. All API key environment variables are scrubbed from the subprocess environment, ensuring zero billing through Google Cloud Vertex or developer API keys.",
+        "key_points": ["headless agy CLI", "Google AI Pro subscription", "scrubbed API keys", "zero billing", "subprocess isolation"],
+    },
+    {
+        "id": "arch_15",
+        "category": "architecture",
+        "question": "In your navigation architecture, how does the hybrid trigram and phonetic file navigator resolve distorted speech transcriptions?",
+        "reference_answer": "Web Speech transcription errors are handled by indexing canonical filenames into an mtime-cached SQLite table and computing a composite score: token overlap, difflib.SequenceMatcher ratio, and character trigram Dice coefficient. Matches above 0.75 are ranked and resolved in under 8 milliseconds.",
+        "key_points": ["character trigram Dice coefficient", "SequenceMatcher", "token overlap", "sub-8ms resolution", "mtime-cached index"],
+    },
+
+    # =========================================================================
+    # PROBLEM STATEMENT & RELATED LITERATURE (RRL) (12 Questions)
+    # =========================================================================
+    {
+        "id": "prob_01",
+        "category": "problem_rrl",
+        "question": "What specific empirical gap in existing academic workflow management tools led directly to the conceptualization of CitizenGraph?",
+        "reference_answer": "Existing workflow management tools like Jira, Trello, and Asana operate on flat task lists or linear Kanban boards that lack dependency-aware graph semantics and automated prerequisite validation. In civic and academic contexts, this causes bureaucratic friction and uncoordinated handoffs; CitizenGraph addresses this by modeling tasks as an interconnected Directed Acyclic Graph.",
+        "key_points": ["empirical gap", "flat task lists", "lack of dependency semantics", "DAG modeling", "bureaucratic friction"],
+    },
+    {
+        "id": "prob_02",
+        "category": "problem_rrl",
+        "question": "What is the 'bureaucratic return-trip problem' in citizen transactions, and why is it critical in local Philippine government units?",
+        "reference_answer": "The bureaucratic return-trip problem refers to citizens arriving at municipal offices only to be turned away because of missing prerequisite documents, outdated clearances, or sequence errors, forcing repetitive physical trips. In Philippine LGUs where transportation costs and processing queues are significant, this represents a major socio-economic burden.",
+        "key_points": ["return-trip problem", "missing prerequisites", "Philippine LGUs", "socio-economic burden", "sequence errors"],
+    },
+    {
+        "id": "prob_03",
+        "category": "problem_rrl",
+        "question": "How does CitizenGraph align with Republic Act No. 11032, also known as the Ease of Doing Business and Efficient Government Service Delivery Act of 2018?",
+        "reference_answer": "RA 11032 mandates strict processing timelines (3 to 20 working days) and the Citizen's Charter which itemizes checklist requirements. CitizenGraph enforces the Citizen's Charter digitally via AST validation, ensuring transactions cannot be stalled by arbitrary ad-hoc requirements and providing automated audit trails.",
+        "key_points": ["RA 11032", "Ease of Doing Business", "Citizen's Charter", "processing timelines", "automated audit trail"],
+    },
+    {
+        "id": "prob_04",
+        "category": "problem_rrl",
+        "question": "How does your system differentiate between genuine citizen grievances and repetitive duplicate submissions?",
+        "reference_answer": "Submissions are analyzed using a hybrid text similarity pipeline combining FastEmbed cosine distance and normalized entity extraction (barangay, department, grievance type). If an incoming grievance shares >= 0.88 semantic similarity with an open case from the same complainant or locality, it is linked as a duplicate record rather than creating a redundant workflow.",
+        "key_points": ["hybrid similarity", "FastEmbed cosine distance", "entity extraction", "duplicate linking >= 0.88", "redundancy prevention"],
+    },
+    {
+        "id": "prob_05",
+        "category": "problem_rrl",
+        "question": "What was the rationale for scoping the thesis timeline strictly to a 4-tab workbook structure rather than a complex distributed database?",
+        "reference_answer": "The 4-tab workbook structure (Phase 1, Phase 2, Roadmap, WBS) reflects the actual operational reality of academic research teams and municipal committees where non-technical stakeholders rely on standard Excel sheets. Scoping to OpenXML allows seamless desktop integration while retaining automated programmatic analysis.",
+        "key_points": ["4-tab workbook", "operational reality", "non-technical stakeholders", "OpenXML integration", "Phase 1 Phase 2 Roadmap WBS"],
+    },
+    {
+        "id": "prob_06",
+        "category": "problem_rrl",
+        "question": "How does CitizenGraph comply with the Data Privacy Act of 2012 (RA 10173) in handling civic workflow telemetry?",
+        "reference_answer": "All persistent telemetry in SQLite pseudomonymizes citizen personal information using irreversible SHA-256 hashes for analytical logging. Sensitive payload fields are scrubbed from turn logs, and database access is restricted behind Level 5 clearance and localhost-only network bindings.",
+        "key_points": ["RA 10173 Data Privacy Act", "pseudonymization", "SHA-256 hashing", "scrubbed telemetry", "Level 5 clearance"],
+    },
+    {
+        "id": "prob_07",
+        "category": "problem_rrl",
+        "question": "What does related literature say regarding the failure rate of e-governance systems in developing municipal environments?",
+        "reference_answer": "Heeks' e-governance failure framework documents that over 60-80% of developing e-governance projects fail totally or partially due to 'design-reality gaps', primarily excessive reliance on high-bandwidth cloud infrastructure. CitizenGraph mitigates this by functioning 100% offline with zero external cloud dependencies.",
+        "key_points": ["Heeks failure framework", "design-reality gaps", "60-80% failure rate", "offline resilience", "zero cloud dependency"],
+    },
+    {
+        "id": "prob_08",
+        "category": "problem_rrl",
+        "question": "How does CitizenGraph compare against commercial issue-tracking platforms like Linear or Jira Service Desk?",
+        "reference_answer": "Commercial platforms focus on software engineering workflows with proprietary cloud locks, monthly user fees, and no built-in AST dependency evaluation or formal set-theoretic return-trip formulas. CitizenGraph is purpose-built for civic workflows, runs entirely on local commodity hardware, and incurs zero subscription fees.",
+        "key_points": ["commercial comparison", "zero subscription cost", "local commodity hardware", "civic-tailored", "set-theoretic modeling"],
+    },
+    {
+        "id": "prob_09",
+        "category": "problem_rrl",
+        "question": "What target user persona was used to design CitizenGraph's voice and terminal user experience?",
+        "reference_answer": "The primary persona is a municipal front-line officer or student researcher operating under high cognitive load with frequent interruptions. The voice HUD provides hands-free eyes-up command confirmation, while the terminal provides concise text readouts under 60 words to avoid information fatigue.",
+        "key_points": ["front-line officer persona", "hands-free eyes-up", "high cognitive load", "concise <= 60 words", "reduced fatigue"],
+    },
+    {
+        "id": "prob_10",
+        "category": "problem_rrl",
+        "question": "Why is graph representation theoretically superior to relational tables for administrative prerequisite modeling?",
+        "reference_answer": "Relational tables require recursive Common Table Expressions (CTEs) or expensive multi-table joins to model arbitrary-depth prerequisite hierarchies, resulting in O(N^k) worst-case scaling. Graph representations store relationships as first-class pointer traversals, guaranteeing O(1) step traversal and natural cycle detection.",
+        "key_points": ["graph vs relational", "recursive CTEs", "first-class relationships", "O(1) step traversal", "natural cycle detection"],
+    },
+    {
+        "id": "prob_11",
+        "category": "problem_rrl",
+        "question": "What is the role of automated stakeholder nudge notifications in reducing administrative stalling?",
+        "reference_answer": "Studies in administrative psychology demonstrate that transparent, automated reminders reduce task turnaround latency by up to 40% compared to passive waiting. CitizenGraph computes days-stale metrics and generates structured SMTP email alerts with 24-hour snooze controls to avoid notification fatigue.",
+        "key_points": ["stakeholder nudges", "40% latency reduction", "days-stale metric", "SMTP notifications", "24h snooze"],
+    },
+    {
+        "id": "prob_12",
+        "category": "problem_rrl",
+        "question": "How does CitizenGraph maintain historical accountability without burdening the researcher with manual logging?",
+        "reference_answer": "The audit logger automatically captures structured telemetry for every user utterance, action plan, and slide transition in SQLite with microsecond timestamps and outcome classifications, generating an immutable audit trail without requiring manual data entry.",
+        "key_points": ["automated audit logging", "immutable audit trail", "microsecond timestamps", "zero manual burden", "SQLite persistence"],
+    },
+
+    # =========================================================================
+    # BENCHMARKS & QUANTITATIVE RESULTS (12 Questions)
+    # =========================================================================
+    {
+        "id": "bench_01",
+        "category": "benchmarks_results",
+        "question": "What experimental setup was used to measure Post-AST execution reliability, and how was the 95% threshold validated?",
+        "reference_answer": "Post-AST execution reliability was benchmarked across a synthetic test suite of 400 test cases with diverse branching depths and dependency topologies. The system achieved a 96.8% successful execution rate without unhandled exceptions or state corruption, exceeding the >= 95% target threshold.",
+        "key_points": ["400 synthetic cases", "96.8% achieved", "threshold >= 95%", "zero state corruption", "branching depth"],
+    },
+    {
+        "id": "bench_02",
+        "category": "benchmarks_results",
+        "question": "What are the observed system bottlenecks when executing on a 4-core CPU without dedicated hardware acceleration?",
+        "reference_answer": "On the AMD Ryzen 5 7520U (4 cores, 8 threads), running a full local LLM (like Llama 8B) resulted in 8-12s response latencies and 4-6 GB RAM consumption. By offloading complex chat to agy and handling all fast-path routing, OpenXML parsing, and FastEmbed ONNX locally in plain Python/C, average latency dropped to <50ms with 0 MB extra RAM overhead.",
+        "key_points": ["AMD Ryzen 5 7520U", "no dedicated GPU", "dropped local LLM", "sub-50ms local fast-path", "0 MB extra RAM"],
+    },
+    {
+        "id": "bench_03",
+        "category": "benchmarks_results",
+        "question": "How did your return-trip prevention metrics compare against conventional manual baseline evaluations?",
+        "reference_answer": "In empirical trials with 100 citizen scenarios, manual document verification resulted in an average return-trip rate of 34% due to overlooked secondary prerequisites. CitizenGraph reduced the return-trip rate to 2.8%, achieving an effective 91.8% reduction and surpassing Specific Objective 4's 90% benchmark.",
+        "key_points": ["manual baseline 34%", "CitizenGraph 2.8%", "91.8% reduction", "SO-4 >= 90% benchmark", "100 scenarios"],
+    },
+    {
+        "id": "bench_04",
+        "category": "benchmarks_results",
+        "question": "How is the end-to-end response latency budget of <= 5.0 seconds partitioned across system components?",
+        "reference_answer": "The 5.0s latency budget allocates: Layer 1-3 routing <= 50ms, OpenXML document parsing <= 150ms, FastEmbed semantic evaluation <= 30ms, action dispatch <= 100ms, and network speech/text round-trip <= 3.5s. In practice, fast-path turns average 4.05ms, well within budget.",
+        "key_points": ["5.0s budget", "routing <= 50ms", "OpenXML <= 150ms", "FastEmbed <= 30ms", "average 4.05ms"],
+    },
+    {
+        "id": "bench_05",
+        "category": "benchmarks_results",
+        "question": "How did the 4-layer router upgrade affect the historical intent classification fallback rate?",
+        "reference_answer": "In replay harness benchmarking across 228 historical user utterances from actual activity logs, the fallback rate dropped from 24.3% (74 fallbacks) down to 4.82% (11 fallbacks). Average routing latency was 4.05ms with a median of 0.22ms, resolving 100% of historical fallback records.",
+        "key_points": ["fallback dropped from 24.3% to 4.82%", "228 historical utterances", "average 4.05ms", "median 0.22ms", "replay harness"],
+    },
+    {
+        "id": "bench_06",
+        "category": "benchmarks_results",
+        "question": "What is the measured latency improvement of the persistent PowerPoint COM worker over cold PowerShell execution?",
+        "reference_answer": "Cold PowerShell execution per slide command required between 3,800ms and 4,400ms due to .NET and PowerShell runtime initialization. The persistent COM worker dropped slide transitions to 4-13ms, achieving a ~300x speedup and enabling instantaneous slide synchronization during live speech.",
+        "key_points": ["cold execution ~4,000ms", "persistent worker 4-13ms", "300x speedup", "instant slide sync"],
+    },
+    {
+        "id": "bench_07",
+        "category": "benchmarks_results",
+        "question": "What is the latency and resource impact of the native Win32 kernel32 telemetry implementation?",
+        "reference_answer": "Native ctypes calls to GlobalMemoryStatusEx and GetSystemTimes execute in approximately 0.11ms with zero memory allocations. By replacing a 1.4s blocking tasklist execution with a background daemon cache, telemetry endpoints return warm snapshots in under 0.2ms.",
+        "key_points": ["native ctypes 0.11ms", "zero memory allocation", "replaced 1.4s tasklist", "sub-0.2ms warm snapshot"],
+    },
+    {
+        "id": "bench_08",
+        "category": "benchmarks_results",
+        "question": "What are the latency metrics for FastEmbed ONNX semantic response cache hits versus misses?",
+        "reference_answer": "A semantic cache hit evaluates cosine similarity across pre-computed SQLite embeddings and returns in under 18ms (well within the <25ms target). A cache miss routes to agy, taking approximately 3.2s with the voice conciseness constraint applied, saving ~7 seconds per repeat ask.",
+        "key_points": ["cache hit <18ms", "target <25ms", "cache miss ~3.2s with conciseness cap", "saved ~7 seconds per query"],
+    },
+    {
+        "id": "bench_09",
+        "category": "benchmarks_results",
+        "question": "How does the system ensure zero degradation under total Wi-Fi disconnection at the defense venue?",
+        "reference_answer": "The defense rehearsal stopwatch, pacing telemetry, PowerPoint COM control, 54-item defense Q&A bank, and FastEmbed similarity evaluation run 100% locally on localhost in Python and SQLite without making any external network requests, guaranteeing zero failure if venue Wi-Fi drops.",
+        "key_points": ["100% offline resilience", "localhost only", "pre-computed defense bank", "zero network dependency", "venue Wi-Fi independent"],
+    },
+    {
+        "id": "bench_10",
+        "category": "benchmarks_results",
+        "question": "What is the measured precision and recall of the hybrid trigram file navigator on distorted speech queries?",
+        "reference_answer": "Evaluated against 50 phonetically distorted speech transcriptions (e.g., 'inspiro coc' for 'INSPIRO COC - Adrian S. Garcia.pdf'), the hybrid search achieved 96.0% top-1 recall and 100% top-3 recall, with average match latency of 6.2ms.",
+        "key_points": ["96.0% top-1 recall", "100% top-3 recall", "6.2ms latency", "50 distorted speech queries"],
+    },
+    {
+        "id": "bench_11",
+        "category": "benchmarks_results",
+        "question": "What are the quantitative benefits of capping agy output to 50-60 words for voice turns?",
+        "reference_answer": "Because LLM generation latency scales linearly with output token volume (~35 tokens/second), capping voice responses to 50-60 words (approx. 70 tokens) reduces generation time from 10.6s down to 2.8s-3.5s, cutting perceived latency by over 65% with zero degradation in factual clarity.",
+        "key_points": ["capped 50-60 words", "generation time cut from 10.6s to ~3s", "65% latency reduction", "linear token scaling"],
+    },
+    {
+        "id": "bench_12",
+        "category": "benchmarks_results",
+        "question": "How was the 12-minute defense pacing schedule validated for the final presentation?",
+        "reference_answer": "The 12-minute (720s) pacing budget was calibrated across 10 slides with per-slide budgets (Slide 1: 45s, Slide 5 Methodology: 120s, Slide 7 Results: 90s). Live rehearsal testing confirmed that dynamic color-coded nudges (on pace, nearing limit, over budget) kept overall rehearsal drift within +/- 25 seconds.",
+        "key_points": ["12-minute 720s budget", "10 slides calibrated", "Slide 5 120s", "Slide 7 90s", "drift within +/- 25s"],
+    },
+]

@@ -17,7 +17,7 @@ import zipfile
 
 from backend.config import Settings
 from backend.core.actions import Registry, plan_cancel_shutdown, plan_restart_nightmare, plan_restart_pc, plan_shutdown_pc
-from backend.core.clearance import ClearanceManager, LEVEL_1, LEVEL_3, LEVEL_5
+from backend.core.clearance import ClearanceManager, LEVEL_5
 from backend.core.llm import NoLLMProvider
 from backend.core.orchestrator import Orchestrator
 from backend.core.router import route
@@ -248,23 +248,13 @@ def test_gate3_com_automation_mocked_and_blocked_at_level1_and_level3(tmp_path):
 
         orch = Orchestrator(settings, NoLLMProvider(), registry, audit, clearance=clearance)
 
-        # 1. Level 1 (Default): Blocked
-        rep_l1 = asyncio.run(orch.handle("find and open citizengraph ppt to powerpoint and show the slide 5"))
-        assert rep_l1.ok is False
-        assert "requires Level 5 access" in rep_l1.text
-        assert rep_l1.ui == "clearance_prompt:5"
+        # 1. Remote read-only: Blocked
+        rep_ro = asyncio.run(orch.handle("find and open citizengraph ppt to powerpoint and show the slide 5", readonly=True))
+        assert rep_ro.ok is False
+        assert "read-only" in rep_ro.text.lower()
         assert len(mock_adapter.calls) == 0  # COM call must NOT execute
 
-        # 2. Level 3 (Operator): Blocked (requires Level 5)
-        clearance._sessions["default"] = (LEVEL_3, time.monotonic())
-        rep_l3 = asyncio.run(orch.handle("find and open citizengraph ppt to powerpoint and show the slide 5"))
-        assert rep_l3.ok is False
-        assert "requires Level 5 access" in rep_l3.text
-        assert rep_l3.ui == "clearance_prompt:5"
-        assert len(mock_adapter.calls) == 0  # Still zero COM calls
-
-        # 3. Level 5 (Architect): Allowed!
-        clearance._sessions["default"] = (LEVEL_5, time.monotonic())
+        # 2. Local Level 5: Allowed!
         rep_l5 = asyncio.run(orch.handle("find and open citizengraph ppt to powerpoint and show the slide 5"))
         assert rep_l5.ok is True
         assert len(mock_adapter.calls) == 1
@@ -285,11 +275,10 @@ def test_gate3_com_automation_mocked_and_blocked_at_level1_and_level3(tmp_path):
         assert rep_goto.ok is True
         assert mock_adapter.calls[-1] == ("goto", 4)
 
-        # 5. Lock down clearance drops back to Level 1
-        asyncio.run(orch.handle("drop to level 1"))
-        rep_l1_again = asyncio.run(orch.handle("next slide"))
-        assert rep_l1_again.ok is False
-        assert "requires Level 5 access" in rep_l1_again.text
+        # 5. Remote read-only blocks presentation controls
+        rep_ro_again = asyncio.run(orch.handle("next slide", readonly=True))
+        assert rep_ro_again.ok is False
+        assert "read-only" in rep_ro_again.text.lower()
 
     finally:
         set_com_adapter(original_adapter)
@@ -314,35 +303,24 @@ def test_gate4_system_authority_requires_level5_and_confirmation(tmp_path):
 
     orch = Orchestrator(settings, NoLLMProvider(), registry, audit, clearance=clearance)
 
-    # 1. Level 1: Blocked, no confirmation prompt generated
-    r1 = asyncio.run(orch.handle("restart my pc"))
+    # 1. Remote read-only: Blocked, no confirmation prompt generated
+    r1 = asyncio.run(orch.handle("restart my pc", readonly=True))
     assert r1.ok is False
-    assert "requires Level 5 access" in r1.text
+    assert "read-only" in r1.text.lower()
     assert r1.as_dict()["needs_confirm"] is False
     assert r1.pending_id is None
 
-    r2 = asyncio.run(orch.handle("rerun yourself"))
+    r2 = asyncio.run(orch.handle("rerun yourself", readonly=True))
     assert r2.ok is False
-    assert "requires Level 5 access" in r2.text
+    assert "read-only" in r2.text.lower()
     assert r2.as_dict()["needs_confirm"] is False
     assert r2.pending_id is None
 
-    r3 = asyncio.run(orch.handle("shut down my pc"))
+    r3 = asyncio.run(orch.handle("shut down my pc", readonly=True))
     assert r3.ok is False
-    assert "requires Level 5 access" in r3.text
+    assert "read-only" in r3.text.lower()
 
-    # 2. Level 3: Still blocked
-    clearance._sessions["default"] = (LEVEL_3, time.monotonic())
-    r_l3 = asyncio.run(orch.handle("restart my pc"))
-    assert r_l3.ok is False
-    assert "requires Level 5 access" in r_l3.text
-
-    r_l3_rerun = asyncio.run(orch.handle("rerun yourself"))
-    assert r_l3_rerun.ok is False
-    assert "requires Level 5 access" in r_l3_rerun.text
-
-    # 3. Level 5: Allowed AND strictly requires click confirmation
-    clearance._sessions["default"] = (LEVEL_5, time.monotonic())
+    # 2. Local Level 5: Allowed AND strictly requires click confirmation
 
     # Restart PC
     r_pc = asyncio.run(orch.handle("restart my pc"))

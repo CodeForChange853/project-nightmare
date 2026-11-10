@@ -1,23 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AuthError, confirmAction, getStatus, lockdownClearance, loginPin, logoutSession, resetSession, sendChat } from './api'
+import { AuthError, confirmAction, getRouterReview, approveRouterMiss, getStatus, loginPin, logoutSession, resetSession, sendChat, setWindowMode } from './api'
 import Background from './components/Background'
 import Boot from './components/Boot'
-import ClearanceModal from './components/ClearanceModal'
-import ClearanceTransition from './components/ClearanceTransition'
-import Composer from './components/Composer'
 import ConfirmDialog from './components/ConfirmDialog'
 import DatabasePanel from './components/DatabasePanel'
-import Dossier from './components/Dossier'
+import DefensePanel from './components/DefensePanel'
 import HelpPanel from './components/HelpPanel'
 import Icon from './components/Icon'
+import Level5View from './components/Level5View'
 import LockScreen from './components/LockScreen'
 import MiniView from './components/MiniView'
-import NodeGraph from './components/NodeGraph'
 import PhoneView from './components/PhoneView'
 import SettingsPanel from './components/SettingsPanel'
+import SpeechPanel from './components/SpeechPanel'
 import StatusBar from './components/StatusBar'
-import TeamProgressPanel from './components/TeamProgressPanel'
-import Terminal from './components/Terminal'
+import TeamProgressPanel, { getEmailDomainMeta } from './components/TeamProgressPanel'
 import { useRecognizer, useSpeaker } from './utils/useSpeech'
 
 let nextId = 1
@@ -248,6 +245,7 @@ export default function App() {
   const [pinError, setPinError] = useState('')
   const [pending, setPending] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [workingTarget, setWorkingTarget] = useState(null)
   const [elapsed, setElapsed] = useState(0)
   const [history, setHistory] = useState([])
   const [activeKey, setActiveKey] = useState('projects')
@@ -264,35 +262,59 @@ export default function App() {
   const [teamProgressData, setTeamProgressData] = useState(null)
   const [teamProgressTab, setTeamProgressTab] = useState('summary')
   const closeTeamProgress = useCallback(() => setTeamProgressOpen(false), [])
-  const [clearancePrompt, setClearancePrompt] = useState(null)
-  const closeClearance = useCallback(() => setClearancePrompt(null), [])
-  const clearanceLevel = status?.clearance_level ?? 1
-  const [transitionState, setTransitionState] = useState(null)
-  const prevClearanceRef = useRef(null)
 
-  useEffect(() => {
-    if (status && prevClearanceRef.current !== null && prevClearanceRef.current !== clearanceLevel) {
-      setTransitionState({ level: clearanceLevel, prevLevel: prevClearanceRef.current })
-    }
-    if (status) {
-      prevClearanceRef.current = clearanceLevel
-    }
-  }, [status, clearanceLevel])
-
-  const openClearance = useCallback(() => {
-    setClearancePrompt({ level: clearanceLevel >= 3 ? 5 : 3 })
-  }, [clearanceLevel])
+  // Global Real-Time SSE Priority Email Feed
+  const [emailToasts, setEmailToasts] = useState([])
+  const [latestSseEmail, setLatestSseEmail] = useState(null)
+  const prevEmailIdsRef = useRef(new Set())
+  const dismissEmailToast = useCallback((id) => {
+    setEmailToasts((prev) => prev.filter((t) => t.id !== id))
+  }, [])
+  const [defenseOpen, setDefenseOpen] = useState(false)
+  const [defenseData, setDefenseData] = useState(null)
+  const closeDefense = useCallback(() => setDefenseOpen(false), [])
 
   const [asleep, setAsleep] = useState(false)
   // layouts: the helper's mini window, the phone (tab bar) and the desktop graph
   const narrowWindow = useMedia('(max-width: 599px)')
   const phoneWidth = useMedia('(max-width: 767px)')
   const [wantFull, setWantFull] = useState(false) // mini window asked to be maximized ("home")
-  const mini = MINI_HOST && narrowWindow
+  const [forceMini, setForceMini] = useState(false) // user clicked minimize (—) in Level 5
+  const mini = (MINI_HOST && narrowWindow) || forceMini
   const phone = !mini && phoneWidth
   const [phoneTab, setPhoneTab] = useState('talk')
   const layoutRef = useRef({})
   layoutRef.current = { mini, phone, phoneTab }
+
+  const handleMinimizeWindow = useCallback(() => {
+    setWantFull(false)
+    setForceMini(true)
+    document.title = MINI_TITLE
+    setWindowMode('mini').catch(() => {})
+  }, [])
+
+  const handleRestoreFullWindow = useCallback(() => {
+    setForceMini(false)
+    setWantFull(true)
+    document.title = FULL_TITLE
+    setWindowMode('maximize').catch(() => {})
+  }, [])
+
+  const handleToggleMaximize = useCallback(() => {
+    setForceMini(false)
+    setWantFull(true)
+    document.title = FULL_TITLE
+    setWindowMode('maximize').catch(() => {})
+    try {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {})
+      } else {
+        document.documentElement.requestFullscreen?.().catch(() => {})
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [])
   const asleepRef = useRef(false)
   asleepRef.current = asleep
   const lastActive = useRef(Date.now())
@@ -307,8 +329,11 @@ export default function App() {
     setFocus({ key: f.node, itemId, n: Date.now() })
   }, [])
 
+  const [speechPanel, setSpeechPanel] = useState(null)
+  const speechPanelRef = useRef(speechPanel)
+  speechPanelRef.current = speechPanel
+  const speaker = useSpeaker()
   const {
-    say,
     cancel,
     speaking,
     muted,
@@ -319,7 +344,94 @@ export default function App() {
     setVoiceGender,
     cycleRate,
     setRate,
-  } = useSpeaker()
+  } = speaker
+  const say = useCallback((...args) => {
+    if (speechPanelRef.current !== 'meeting') speaker.say(...args)
+  }, [speaker.say])
+
+  // Persistent Global SSE Bridge for instant real-time Pub/Sub email push notifications
+  useEffect(() => {
+    const eventSource = new EventSource('/api/events')
+
+    eventSource.onopen = () => {
+      console.log('[SSE] Global stream connected to /api/events')
+    }
+
+    const handleIncomingNewEmail = (data) => {
+      if (!data) return
+      const idStr = String(data.id || data.row_id || Date.now())
+
+      // Deduplicate if already handled
+      if (prevEmailIdsRef.current.has(idStr)) return
+      prevEmailIdsRef.current.add(idStr)
+
+      setLatestSseEmail(data)
+
+      const meta = getEmailDomainMeta(data.sender)
+      const provider = meta?.brand || data.sender || 'Unknown Provider'
+      const subject = data.subject || 'No Subject'
+      const announcement = `You have new mail from ${provider}, subject: ${subject}.`
+
+      // 1. Proactive Voice Announcement
+      try {
+        say(announcement)
+      } catch (speechErr) {
+        console.warn('[SpeechSynthesis] Announcement error:', speechErr)
+      }
+
+      // 2. Global UI Toast Notification
+      const toastId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+      setEmailToasts((prev) => [
+        ...prev,
+        {
+          id: toastId,
+          provider,
+          subject,
+          sender: data.sender,
+          category: data.category || 'Priority',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ])
+      setTimeout(() => {
+        setEmailToasts((prev) => prev.filter((t) => t.id !== toastId))
+      }, 8000)
+    }
+
+    eventSource.addEventListener('new_email', (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        handleIncomingNewEmail(payload)
+      } catch (err) {
+        console.warn('[SSE] Failed to parse new_email event:', err)
+      }
+    })
+
+    eventSource.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        if (payload?.type === 'new_email') {
+          handleIncomingNewEmail(payload)
+        } else if (payload?.type === 'turn_status') {
+          if (payload.status === 'working') {
+            setWorkingTarget(payload.target || 'agy')
+            setBusy(true)
+          } else if (payload.status === 'idle') {
+            setWorkingTarget(null)
+          }
+        }
+      } catch (err) {
+        // ping or non-json comment
+      }
+    }
+
+    eventSource.onerror = (err) => {
+      console.warn('[SSE] Global EventSource connection error / reconnecting:', err)
+    }
+
+    return () => {
+      eventSource.close()
+    }
+  }, [])
 
   const busyRef = useRef(false)
   const pendingRef = useRef(null)
@@ -333,7 +445,7 @@ export default function App() {
   rateRef.current = rate
 
   const add = useCallback((role, text, extra = {}) => {
-    setEntries((prev) => [...prev, { id: nextId++, role, text, ...extra }])
+    setEntries((prev) => [...prev, { id: nextId++, role, text, createdAt: performance.now(), ...extra }])
     if (tabRef.current !== 'log') setUnread((n) => n + 1)
   }, [])
 
@@ -364,8 +476,8 @@ export default function App() {
   const finishBoot = useCallback(() => setBootDone(true), [])
 
   useEffect(() => {
-    document.title = MINI_HOST && !wantFull ? MINI_TITLE : FULL_TITLE
-  }, [wantFull])
+    document.title = (MINI_HOST && !wantFull) || forceMini ? MINI_TITLE : FULL_TITLE
+  }, [wantFull, forceMini])
   const wasNarrow = useRef(narrowWindow)
   useEffect(() => {
     if (MINI_HOST && narrowWindow && !wasNarrow.current) setWantFull(false) // the shortcut shrank it
@@ -427,16 +539,6 @@ export default function App() {
     asideRef.current?.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' })
   }, [])
 
-  const handleLockdown = useCallback(async () => {
-    try {
-      await lockdownClearance()
-      refreshStatus()
-      say('Clearance locked down to Level 1.')
-    } catch (err) {
-      add('system', err.message || 'Lockdown failed.')
-    }
-  }, [refreshStatus, say, add])
-
   const submit = useCallback(
     async (text) => {
       let clean = text.trim()
@@ -457,10 +559,25 @@ export default function App() {
       if (clean.startsWith('/')) {
         const cmd = clean.split(/\s+/)[0].toLowerCase()
         if (cmd === '/help') return setHelpOpen(true)
-        if (cmd === '/timeline' || cmd === '/team') {
+        if (cmd === '/voice' || cmd === '/meeting' || cmd === '/transcribe') {
+          if (status?.role === 'readonly') return
+          cancel()
+          return setSpeechPanel(cmd === '/voice' ? 'voice' : 'meeting')
+        }
+        if (cmd === '/emails' || cmd === '/priority') {
+          setTeamProgressTab('emails')
+          setTeamProgressOpen(true)
+          return
+        }
+        if (cmd === '/defense' || cmd === '/rehearsal') {
+          setDefenseOpen(true)
+          return
+        }
+        if (cmd === '/cockpit' || cmd === '/telemetry') {
+          clean = 'system telemetry'
+        } else if (cmd === '/timeline' || cmd === '/team') {
           clean = 'show team progress'
-        } else if (cmd === '/clearance') return openClearance()
-        if (cmd === '/lockdown') return handleLockdown()
+        }
         if (cmd === '/clear' || cmd === '/new') {
           clearConversation()
           switchTab('log')
@@ -468,6 +585,21 @@ export default function App() {
         }
         if (cmd === '/db') return setDbOpen(true)
         if (cmd === '/settings') return setSettingsOpen(true)
+        if (cmd === '/review') {
+          getRouterReview()
+            .then((data) => {
+              if (!data.misses || data.misses.length === 0) {
+                add('nightmare', 'No pending router misses in the review queue.')
+              } else {
+                const lines = data.misses.map(
+                  (m) => `#${m.id}: "${m.utterance}" -> nearest: ${m.nearest_intent} (${(m.similarity_score * 100).toFixed(1)}%)`
+                )
+                add('nightmare', `Router Miss Queue (${data.misses.length} pending):\n` + lines.join('\n'))
+              }
+            })
+            .catch((err) => add('system', `Failed to load review queue: ${err.message}`))
+          return
+        }
         if (cmd === '/reminders') {
           clean = 'what are my reminders'
         } else if (cmd === '/sleep') {
@@ -499,15 +631,13 @@ export default function App() {
         const home = HOME_RE.test(clean)
         let msg
         if (home) {
-          msg = layoutRef.current.mini ? 'Opening the full view.' : 'Youâ€™re already on the full view.'
-          if (layoutRef.current.mini) setWantFull(true)
-        } else if (MINI_HOST) {
-          msg = layoutRef.current.mini ? 'This is the small window.' : 'Back to the small window.'
-          setWantFull(false)
+          msg = layoutRef.current.mini ? 'Opening the full view.' : 'You’re already on the full view.'
+          handleRestoreFullWindow()
         } else {
-          msg = 'Press Ctrl+Alt+N on the laptop to open the small window.'
+          msg = layoutRef.current.mini ? 'This is the small window.' : 'Back to the small window.'
+          handleMinimizeWindow()
         }
-        add('nightmare', msg, { ok: true, understood: home ? 'view â†’ full' : 'view â†’ mini' })
+        add('nightmare', msg, { ok: true, understood: home ? 'view → full' : 'view → mini' })
         say(msg)
         return
       }
@@ -564,6 +694,7 @@ export default function App() {
       }
 
       setBusy(true)
+      setWorkingTarget('processing')
       const t0 = performance.now()
       let focusAfter = null
       try {
@@ -574,9 +705,11 @@ export default function App() {
         if (res.ui === 'open_url' && res.url) {
           const opened = openInBrowser(res.url)
           link = { url: res.url, blocked: !opened }
+        } else if (res.url) {
+          link = { url: res.url, label: 'Visit Portfolio' }
         }
         if (res.ui === 'clear') setEntries([]) // "new session" by voice; the backend already forgot
-        add('nightmare', res.reply, { ok: res.ok, understood: res.understood, link })
+        add('nightmare', res.reply, { ok: res.ok, understood: res.understood, focus: res.focus, link })
         if (stacked()) {
           switchTab('log') // on a phone, show the answer instead of an unread badge far below
           revealPanel()
@@ -598,9 +731,15 @@ export default function App() {
           setTeamProgressTab('diff')
           setTeamProgressOpen(true)
         }
-        if (res.ui === 'clearance_prompt:3') setClearancePrompt({ level: 3 })
-        if (res.ui === 'clearance_prompt:5') setClearancePrompt({ level: 5 })
-        if (res.ui === 'clearance_reset:1') refreshStatus()
+        if (res.ui === 'team_progress:emails' || res.ui === 'team_progress:inbox' || res.ui === 'email_report') {
+          setTeamProgressData(res.data)
+          setTeamProgressTab('emails')
+          setTeamProgressOpen(true)
+        }
+        if (res.ui?.startsWith('defense:')) {
+          setDefenseData(res.data)
+          setDefenseOpen(true)
+        }
         // Always read the full generated reply aloud
         say(res.reply)
       } catch (err) {
@@ -608,6 +747,7 @@ export default function App() {
         add('system', err.message)
       } finally {
         setBusy(false)
+        setWorkingTarget(null)
         // light the node up only after fresh counts arrive, so a new reminder is already on the arc
         refreshStatus().then(() => applyFocus(focusAfter))
       }
@@ -623,8 +763,7 @@ export default function App() {
       clearConversation,
       applyFocus,
       revealPanel,
-      openClearance,
-      handleLockdown,
+      status?.role,
     ],
   )
 
@@ -644,11 +783,11 @@ export default function App() {
   useEffect(() => {
     const id = setInterval(() => {
       const occupied = asleepRef.current || busyRef.current || pendingRef.current || lockedRef.current
-      if (occupied || dbOpen || settingsOpen || helpOpen || speaking || offline) return
+      if (occupied || dbOpen || settingsOpen || helpOpen || speechPanel || speaking || offline) return
       if (Date.now() - lastActive.current > SLEEP_AFTER_MS) setAsleep(true)
     }, 5000)
     return () => clearInterval(id)
-  }, [dbOpen, settingsOpen, helpOpen, speaking, offline])
+  }, [dbOpen, settingsOpen, helpOpen, speechPanel, speaking, offline])
 
   const decide = useCallback(
     async (approve) => {
@@ -674,10 +813,15 @@ export default function App() {
   const approve = useCallback(() => decide(true), [decide])
   const deny = useCallback(() => decide(false), [decide])
 
-  const { listening, interim, error: speechError, lang, toggleLang, start: recStart, stop: recStop, supported } =
-    useRecognizer({ onFinal: submit })
+  const { listening, interim, error: speechError, lang, toggleLang, start: recStart, stop: recStop, cancel: recCancel, supported } =
+    useRecognizer({ onFinal: (text) => { if (!speechPanelRef.current) submit(text) } })
+
+  useEffect(() => {
+    if (speechPanel) { recCancel(); cancel() }
+  }, [speechPanel, recCancel, cancel])
 
   const press = useCallback(() => {
+    if (speechPanelRef.current) return
     if (busyRef.current || pendingRef.current || lockedRef.current) return
     cancel()
     recStart()
@@ -756,7 +900,7 @@ export default function App() {
     confirm: ['Awaiting you', 'Approve or deny with a click', null],
     thinking: ['Thinking', `${elapsed}s so far`, 'Fast model ~8s Â· Smart model ~14s'],
     listening: ['Listening', interim || 'Speak now, release to send', null],
-    speaking: ['Speaking', `${voiceGender} voice Â· ${rate}x`, TOUCH ? 'Tap Stop to interrupt' : 'Hold Space or click Stop to interrupt'],
+    speaking: ['Speaking', `${voiceGender} voice · ${rate}x`, TOUCH ? 'Tap Stop to interrupt' : 'Hold Space or click Stop to interrupt'],
     idle: supported
       ? ['Watching', TOUCH ? 'Hold the eye to talk' : 'Hold the eye or Space to talk', null]
       : ['Watching', 'Type a command in the panel', 'Voice input needs Chrome or Edge'],
@@ -784,8 +928,6 @@ export default function App() {
     speaking,
     onStopSpeaking: cancel,
     speechError,
-    clearanceLevel,
-    onOpenClearance: openClearance,
   }
   const talkProps = {
     mode,
@@ -801,40 +943,46 @@ export default function App() {
     speaking,
     onSpeak: say,
     onStop: cancel,
-    clearanceLevel,
-    onOpenClearance: openClearance,
   }
 
   return (
     <div
-      data-clearance={clearanceLevel}
-      className={`relative flex h-dvh flex-col transition-colors duration-700 ${mini || phone ? 'overflow-hidden' : 'overflow-y-auto lg:overflow-hidden'}`}
+      data-clearance="5"
+      className="relative flex h-dvh flex-col overflow-hidden transition-colors duration-700"
     >
-      <Background clearanceLevel={clearanceLevel} />
-      {!mini && (
+      <Background />
+      {!mini && (phone || locked) && (
         <StatusBar
           status={status}
           locked={locked}
           lastAsked={lastAsked}
+          busy={busy}
+          workingTarget={workingTarget}
+          elapsed={elapsed}
           onLogout={handleLogout}
           onRetry={refreshStatus}
           onSettings={() => setSettingsOpen(true)}
-          onOpenClearance={openClearance}
-          onLockdown={handleLockdown}
+          onOpenEmails={() => {
+            setTeamProgressTab('emails')
+            setTeamProgressOpen(true)
+          }}
+          onOpenDefense={() => setDefenseOpen(true)}
+          onOpenTelemetry={() => submit('system telemetry')}
         />
       )}
 
       {locked ? (
         <LockScreen pin={pinInput} setPin={setPinInput} error={pinError} busy={busy} onSubmit={handleLogin} />
       ) : mini ? (
-        <MiniView
-          {...talkProps}
-          status={status}
-          offline={offline}
-          onHome={() => submit('home')}
-          composer={composerProps}
-          onOpenClearance={openClearance}
-        />
+        <div className={forceMini && !narrowWindow ? 'm-auto flex h-[560px] w-[400px] max-w-full flex-col overflow-hidden rounded-2xl border border-[#ff2a4b]/60 bg-[#0b0204]/95 shadow-[0_0_50px_rgba(220,20,60,0.4)]' : 'flex min-h-0 flex-1 flex-col'}>
+          <MiniView
+            {...talkProps}
+            status={status}
+            offline={offline}
+            onHome={handleRestoreFullWindow}
+            composer={composerProps}
+          />
+        </div>
       ) : phone ? (
         <PhoneView
           tab={phoneTab}
@@ -850,91 +998,57 @@ export default function App() {
           busy={busy}
           elapsed={elapsed}
           onSpeak={say}
-          clearanceLevel={clearanceLevel}
-          onOpenClearance={openClearance}
         />
       ) : (
-        <main className="grid flex-1 grid-cols-[minmax(0,1fr)] gap-4 px-4 pb-4 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_minmax(380px,420px)] lg:px-6 lg:pb-6">
-          <section className="min-h-0 md:h-[600px] lg:h-auto lg:overflow-y-auto" aria-label="Nightmare core">
-            <NodeGraph
-              categories={categories}
-              activeKey={activeKey}
-              onCategory={setActiveKey}
-              selectedId={selectedId}
-              onSelect={handleSelect}
-              onActivate={handleActivate}
-              mode={mode}
-              title={title}
-              caption={caption}
-              caption2={caption2}
-              busy={busy}
-              ready={bootDone}
-              canTalk={canTalk}
-              onPressStart={press}
-              onPressEnd={release}
-              focus={focus}
-              asleep={asleep}
-              clearanceLevel={status?.clearance_level ?? 1}
-            />
-          </section>
-
-          <aside
-            ref={asideRef}
-            className={`glass flex h-[85dvh] min-h-0 flex-col overflow-hidden rounded-3xl transition-[opacity,filter] duration-1000 lg:h-auto ${
-              asleep ? 'opacity-45 saturate-50' : ''
-            }`}
-          >
-            <div className="flex items-center gap-1 border-b border-scar/40 p-2" role="tablist" aria-label="Panel">
-              {[
-                { key: 'details', label: 'Details', icon: 'eye' },
-                { key: 'log', label: 'Conversation', icon: 'log' },
-              ].map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={panelTab === t.key}
-                  onClick={() => switchTab(t.key)}
-                  className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-[13px] transition-colors ${
-                    panelTab === t.key
-                      ? 'bg-scar/50 text-bone shadow-[inset_0_1px_0_rgba(255,120,135,0.15)]'
-                      : 'text-ash hover:text-bone'
-                  }`}
-                >
-                  <Icon name={t.icon} size={15} />
-                  {t.label}
-                  {t.key === 'log' && unread > 0 && (
-                    <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-crimson px-1 text-[10px] font-semibold text-white">
-                      {unread}
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            {panelTab === 'details' ? (
-              <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-4" role="tabpanel">
-                <Dossier
-                  item={selectedItem}
-                  status={status}
-                  offline={offline}
-                  history={history}
-                  readonly={readonly}
-                  disabled={disabled}
-                  onRun={submit}
-                  onRetry={refreshStatus}
-                />
-              </div>
-            ) : (
-              <Terminal entries={entries} busy={busy} elapsed={elapsed} onSpeak={say} />
-            )}
-
-            <Composer {...composerProps} />
-          </aside>
-        </main>
+        <Level5View
+          disabled={disabled || offline}
+          speechError={speechError}
+          status={status}
+          categories={categories}
+          activeKey={activeKey}
+          onCategory={setActiveKey}
+          selectedId={selectedId}
+          selectedItem={selectedItem}
+          onSelect={(item) => setSelectedId(item ? item.id : null)}
+          onActivate={handleActivate}
+          mode={mode}
+          title={title}
+          caption={caption}
+          caption2={caption2}
+          focus={focus}
+          asleep={asleep}
+          bootDone={bootDone}
+          entries={entries}
+          busy={busy}
+          workingTarget={workingTarget}
+          elapsed={elapsed}
+          listening={listening}
+          interim={interim}
+          speaking={speaking}
+          canTalk={canTalk}
+          speechProgress={speaker.speechProgress}
+          onPressStart={press}
+          onPressEnd={release}
+          onSubmit={submit}
+          onSpeak={say}
+          onStopSpeaking={cancel}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenDb={() => setDbOpen(true)}
+          onOpenHelp={() => setHelpOpen(true)}
+          onOpenDefense={() => setDefenseOpen(true)}
+          onOpenTeamTimeline={() => submit('show team progress')}
+          onOpenEmails={() => {
+            setTeamProgressTab('emails')
+            setTeamProgressOpen(true)
+          }}
+          onOpenTelemetry={() => submit('system telemetry')}
+          onMinimizeWindow={handleMinimizeWindow}
+          onToggleMaximize={handleToggleMaximize}
+        />
       )}
 
       {pending && <ConfirmDialog action={pending} onApprove={approve} onDeny={deny} />}
+      {speechPanel && !locked && !readonly && <SpeechPanel mode={speechPanel} speaker={speaker} onClose={() => { cancel(); setSpeechPanel(null) }} />}
       {dbOpen && !locked && <DatabasePanel onClose={closeDbPanel} />}
       {settingsOpen && !locked && !readonly && <SettingsPanel onClose={closeSettingsPanel} />}
       {helpOpen && !locked && (
@@ -955,32 +1069,64 @@ export default function App() {
           onDecline={deny}
           onClose={closeTeamProgress}
           onRefresh={() => submit('show team progress')}
+          incomingEmail={latestSseEmail}
         />
       )}
-      {clearancePrompt && !locked && (
-        <ClearanceModal
-          level={clearancePrompt.level}
-          currentLevel={clearanceLevel}
-          onClose={closeClearance}
-          onSuccess={(lvl) => {
-            closeClearance()
-            refreshStatus()
-            if (lvl === 1) {
-              say('Clearance locked down to Level 1.')
-            } else {
-              say(`Clearance elevated to Level ${lvl}.`)
-            }
-          }}
-        />
+      {/* GLOBAL PROACTIVE EMAIL TOAST NOTIFICATION CONTAINER */}
+      {emailToasts.length > 0 && (
+        <div className="fixed top-16 right-6 z-50 flex flex-col gap-2.5 max-w-sm w-full pointer-events-none">
+          {emailToasts.map((toast) => (
+            <aside
+              key={toast.id}
+              role="status"
+              aria-live="polite"
+              className="pointer-events-auto flex items-start gap-3 p-3.5 rounded-xl border border-amber-400/90 bg-[#160408]/98 backdrop-blur-md text-bone shadow-[0_0_30px_rgba(245,158,11,0.35)] animate-fadeIn transition cursor-pointer hover:border-amber-300"
+              onClick={() => {
+                setTeamProgressTab('emails')
+                setTeamProgressOpen(true)
+                dismissEmailToast(toast.id)
+              }}
+            >
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-crimson/30 border border-crimson/60 text-amber-300 shadow-[0_0_10px_rgba(220,38,38,0.3)]">
+                <Icon name="mail" className="h-4 w-4 text-amber-400" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-mono font-bold text-amber-300 uppercase tracking-wider">
+                    NEW EMAIL ARRIVED • {toast.category ? toast.category.toUpperCase() : 'PRIORITY'}
+                  </span>
+                  <span className="text-[10px] font-mono text-ash">{toast.time}</span>
+                </div>
+                <h4 className="text-xs font-bold text-bone truncate mt-0.5" title={toast.subject}>
+                  {toast.subject}
+                </h4>
+                <p className="text-[11px] font-mono text-ash truncate">
+                  From: <strong className="text-amber-200">{toast.provider}</strong> ({toast.sender})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  dismissEmailToast(toast.id)
+                }}
+                className="text-ash hover:text-white text-xs px-1 hover:bg-scar/30 rounded"
+                title="Dismiss notification"
+              >
+                ✕
+              </button>
+            </aside>
+          ))}
+        </div>
       )}
+      <DefensePanel
+        open={defenseOpen && !locked}
+        data={defenseData}
+        status={status}
+        onClose={closeDefense}
+        onCommand={(cmd) => submit(cmd)}
+      />
       {!bootDone && <Boot done={bootLoaded} onFinished={finishBoot} />}
-      {transitionState && (
-        <ClearanceTransition
-          level={transitionState.level}
-          prevLevel={transitionState.prevLevel}
-          onComplete={() => setTransitionState(null)}
-        />
-      )}
     </div>
   )
 }

@@ -1,7 +1,9 @@
 // Tiny inline icon set (24px grid, stroke-based) so the UI ships with no icon library.
 const PATHS = {
+  doc: 'M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5',
   folder: 'M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z',
   bell: 'M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 1.5h-15zM10 20.5a2 2 0 0 0 4 0',
+  mail: 'M3 5.5h18a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 17V7A1.5 1.5 0 0 1 3 5.5zm0 1.5 9 6 9-6',
   app: 'M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z',
   bolt: 'M13 3 5 13.5h6L10 21l8-10.5h-6z',
   spark: 'M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18',
@@ -30,6 +32,10 @@ const PATHS = {
   eye:'M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12zM12 9.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z',
   shield: 'M12 3 4.5 6.5v5.2c0 4.8 3.2 8.7 7.5 10.3 4.3-1.6 7.5-5.5 7.5-10.3V6.5z',
   x: 'M6.5 6.5l11 11M17.5 6.5l-11 11',
+  cpu: 'M4 4h16v16H4zM9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 15h3M1 9h3M1 15h3',
+  battery: 'M6 7h11a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zm13 4h1a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-1M7 10v4M10 10v4',
+  presentation: 'M3 4h18v11H3zM12 15v5M8 20h8M8 8l4 3 4-3',
+  gauge: 'M12 14v-4M4.9 19.1A9 9 0 1 1 19.1 19.1',
 }
 
 export default function Icon({ name, size = 16, className = '', strokeWidth = 1.6 }) {
@@ -51,37 +57,60 @@ export default function Icon({ name, size = 16, className = '', strokeWidth = 1.
   )
 }
 
-/** The Nightmare sigil: a blood moon cut by a slit pupil, evolving with clearance tier. */
-export function Sigil({ size = 28, className = '', clearanceLevel = 1 }) {
-  const isL5 = clearanceLevel === 5
-  const isL3 = clearanceLevel === 3
-  const gradId = `sigil-moon-l${clearanceLevel}`
+/** The Nightmare sigil: Crimson Cosmic Eye Sigil with tilted planetary ring and fiery slit pupil. */
+export function Sigil({ size = 28, className = '' }) {
+  const gradId = 'sigil-moon-l5'
+  const accentGold = '#ffd166'
   return (
-    <svg aria-hidden width={size} height={size} viewBox="0 0 32 32" className={className}>
+    <svg aria-hidden width={size} height={size} viewBox="0 0 36 36" className={className}>
       <defs>
-        <radialGradient id={gradId} cx="38%" cy="32%" r="75%">
-          <stop offset="0" stopColor={isL5 ? '#fff3b0' : isL3 ? '#ffd88a' : '#ff8a95'} />
-          <stop offset="0.45" stopColor={isL5 ? '#ff2a4b' : isL3 ? '#e8a33d' : '#dc143c'} />
-          <stop offset="1" stopColor={isL5 ? '#1c0207' : isL3 ? '#4a1208' : '#3a0610'} />
+        <radialGradient id={gradId} cx="50%" cy="50%" r="65%">
+          <stop offset="0" stopColor="#ff2a4b" />
+          <stop offset="0.52" stopColor="#6b0515" />
+          <stop offset="1" stopColor="#090103" />
         </radialGradient>
       </defs>
-      <circle
-        cx="16"
-        cy="16"
-        r="14.5"
+      {/* Tilted cosmic planetary orbit */}
+      <ellipse
+        cx="18"
+        cy="18"
+        rx="16.5"
+        ry="6.2"
+        transform="rotate(-20 18 18)"
         fill="none"
-        stroke={isL5 ? '#ffd166' : isL3 ? '#e8a33d' : '#5c1a24'}
-        strokeOpacity={isL5 ? 0.85 : isL3 ? 0.7 : 1}
-        strokeWidth={isL5 ? '1.3' : '1'}
-        strokeDasharray={isL5 ? '3 2' : isL3 ? '6 2' : undefined}
+        stroke={accentGold}
+        strokeOpacity={0.85}
+        strokeWidth="0.9"
       />
-      <circle cx="16" cy="16" r="10" fill={`url(#${gradId})`} />
-      {isL5 && <circle cx="16" cy="16" r="7.2" fill="#070203" stroke="#ffd166" strokeWidth="0.6" strokeOpacity="0.7" />}
+      {/* Astrolabe rune ring */}
+      <circle
+        cx="18"
+        cy="18"
+        r="12.5"
+        fill="none"
+        stroke={accentGold}
+        strokeOpacity={0.9}
+        strokeWidth="1.1"
+        strokeDasharray="3 1.5"
+      />
+      {/* Almond eyelid contour */}
       <path
-        d="M16 7.5c2.2 2.6 2.2 14.4 0 17-2.2-2.6-2.2-14.4 0-17z"
-        fill="#070203"
-        stroke={isL5 ? '#ffd166' : isL3 ? '#ff8a47' : 'none'}
-        strokeWidth={isL5 ? '0.7' : isL3 ? '0.4' : '0'}
+        d="M6.5 18 Q18 8.5 29.5 18 Q18 27.5 6.5 18 Z"
+        fill="none"
+        stroke="#ff2a4b"
+        strokeOpacity="0.85"
+        strokeWidth="0.9"
+      />
+      {/* Glossy crimson iris sphere */}
+      <circle cx="18" cy="18" r="8.2" fill={`url(#${gradId})`} stroke={accentGold} strokeWidth="0.8" />
+      {/* Wet glass highlight */}
+      <ellipse cx="20.8" cy="15" rx="1.6" ry="0.8" transform="rotate(32 20.8 15)" fill="#fff5e6" fillOpacity="0.65" />
+      {/* Blazing vertical cat-slit pupil */}
+      <path
+        d="M18 10.6c1.9 2.4 1.9 12.4 0 14.8-1.9-2.4-1.9-12.4 0-14.8z"
+        fill="#040001"
+        stroke="#ffd166"
+        strokeWidth="0.85"
       />
     </svg>
   )
